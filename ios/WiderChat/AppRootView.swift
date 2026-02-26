@@ -223,7 +223,7 @@ private struct ConversationsView: View {
 private struct ChatView: View {
     @ObservedObject var vm: AppViewModel
     @State private var messageInput = ""
-    @State private var showingNoteSheet = false
+    @State private var showingInternalNoteComposer = false
     @State private var noteInput = ""
 
     var currentConversation: Conversation? {
@@ -250,7 +250,7 @@ private struct ChatView: View {
                 }
                 Spacer()
                 Menu {
-                    Button(tr(vm.locale, .internalNote)) { showingNoteSheet = true }
+                    Button(tr(vm.locale, .internalNote)) { showingInternalNoteComposer.toggle() }
                     Button((currentConversation?.status ?? .open) == .open ? tr(vm.locale, .closeConversation) : tr(vm.locale, .reopenConversation)) {
                         vm.toggleConversationStatus()
                     }
@@ -275,6 +275,38 @@ private struct ChatView: View {
                 .padding(12)
             }
 
+            if showingInternalNoteComposer {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(tr(vm.locale, .internalNote))
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Color(red: 0.58, green: 0.25, blue: 0.05))
+                    HStack(spacing: 8) {
+                        TextField(tr(vm.locale, .internalNotePlaceholder), text: $noteInput)
+                            .padding(.horizontal, 12)
+                            .frame(height: 48)
+                            .background(Color(red: 1.0, green: 0.97, blue: 0.93))
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(Color(red: 0.58, green: 0.25, blue: 0.05).opacity(0.4), lineWidth: 1)
+                            )
+                        Button(tr(vm.locale, .addNote)) {
+                            vm.addNote(noteInput)
+                            noteInput = ""
+                            showingInternalNoteComposer = false
+                        }
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Color(red: 0.58, green: 0.25, blue: 0.05))
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(Color(red: 0.99, green: 0.95, blue: 0.78))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .padding(.horizontal, 12)
+                .padding(.bottom, 8)
+            }
+
             HStack(spacing: 10) {
                 TextField(tr(vm.locale, .typeMessage), text: $messageInput, axis: .vertical)
                     .lineLimit(1...4)
@@ -297,33 +329,6 @@ private struct ChatView: View {
             }
             .padding(12)
             .background(AppPalette.surface)
-        }
-        .sheet(isPresented: $showingNoteSheet) {
-            NavigationStack {
-                VStack(alignment: .leading, spacing: 10) {
-                    TextEditor(text: $noteInput)
-                        .frame(minHeight: 160)
-                        .padding(8)
-                        .background(AppPalette.card)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                    Spacer()
-                }
-                .padding(16)
-                .navigationTitle(tr(vm.locale, .internalNote))
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button(tr(vm.locale, .cancel)) { showingNoteSheet = false }
-                    }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button(tr(vm.locale, .addNote)) {
-                            vm.addNote(noteInput)
-                            noteInput = ""
-                            showingNoteSheet = false
-                        }
-                    }
-                }
-            }
-            .presentationDetents([.medium])
         }
     }
 }
