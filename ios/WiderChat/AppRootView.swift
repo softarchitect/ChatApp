@@ -545,7 +545,7 @@ private struct PrivacyPolicyView: View {
                             icon: item.icon,
                             iconTint: Color(red: 0.06, green: 0.73, blue: 0.51),
                             title: item.title,
-                            body: item.body,
+                            text: item.body,
                             index: idx + 1
                         )
                     }
@@ -574,7 +574,7 @@ private struct TermsOfServiceView: View {
                             icon: item.icon,
                             iconTint: Color(red: 0.05, green: 0.65, blue: 0.91),
                             title: item.title,
-                            body: item.body,
+                            text: item.body,
                             index: idx + 1
                         )
                     }
@@ -718,7 +718,7 @@ private struct PolicySectionCard: View {
     let icon: String
     let iconTint: Color
     let title: String
-    let body: String
+    let text: String
     let index: Int
 
     var bodyView: some View {
@@ -737,7 +737,7 @@ private struct PolicySectionCard: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(AppPalette.textMuted)
             }
-            Text(body)
+            Text(text)
                 .font(.system(size: 14))
                 .foregroundStyle(AppPalette.textMuted)
                 .padding(.top, 8)
