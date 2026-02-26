@@ -36,9 +36,9 @@ private struct MainShellView: View {
                 case .settings:
                     SettingsView(vm: vm)
                 case .privacy:
-                    InfoPageView(vm: vm, title: tr(vm.locale, .privacyPolicy), sections: privacySections(vm.locale))
+                    PrivacyPolicyView(vm: vm)
                 case .terms:
-                    InfoPageView(vm: vm, title: tr(vm.locale, .termsOfService), sections: termsSections(vm.locale))
+                    TermsOfServiceView(vm: vm)
                 case .version:
                     VersionView(vm: vm)
                 case .login:
@@ -332,60 +332,108 @@ private struct SettingsView: View {
     @ObservedObject var vm: AppViewModel
     @State private var pushEnabled = true
     @State private var soundEnabled = true
+    @State private var showingLanguageDialog = false
     @State private var showingLogoutAlert = false
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 14) {
-                card {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Widers Team").font(.system(size: 16, weight: .semibold)).foregroundStyle(AppPalette.textPrimary)
-                        Text("support@widers.app").font(.system(size: 13)).foregroundStyle(AppPalette.textMuted)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                section(title: tr(vm.locale, .notificationSettings)) {
-                    Toggle(tr(vm.locale, .pushNotifications), isOn: $pushEnabled)
-                    Divider().overlay(AppPalette.border)
-                    Toggle(tr(vm.locale, .soundAlerts), isOn: $soundEnabled)
-                }
-
-                section(title: tr(vm.locale, .appearance)) {
-                    Toggle(tr(vm.locale, .darkMode), isOn: $vm.darkMode)
-                    Divider().overlay(AppPalette.border)
-                    HStack {
-                        Text(tr(vm.locale, .language))
-                        Spacer()
-                        Picker("", selection: $vm.locale) {
-                            Text("EN").tag(AppLocale.en)
-                            Text("AR").tag(AppLocale.ar)
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(width: 120)
-                    }
-                }
-
-                section(title: tr(vm.locale, .about)) {
-                    settingsLink(tr(vm.locale, .privacyPolicy)) { vm.setScreen(.privacy) }
-                    Divider().overlay(AppPalette.border)
-                    settingsLink(tr(vm.locale, .termsOfService)) { vm.setScreen(.terms) }
-                    Divider().overlay(AppPalette.border)
-                    settingsLink(tr(vm.locale, .version)) { vm.setScreen(.version) }
-                }
-
-                Button(role: .destructive) {
-                    showingLogoutAlert = true
-                } label: {
-                    Text(tr(vm.locale, .logout))
-                        .font(.system(size: 15, weight: .semibold))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 48)
-                        .background(Color.red.opacity(0.12))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+        VStack(spacing: 0) {
+            VStack {
+                HStack {
+                    Text(tr(vm.locale, .settings))
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundStyle(AppPalette.textPrimary)
+                    Spacer()
                 }
             }
-            .padding(16)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
+            .background(AppPalette.surface)
+
+            ScrollView {
+                VStack(spacing: 0) {
+                    HStack {
+                        RoundedRectangle(cornerRadius: 28)
+                            .fill(AppPalette.primary)
+                            .frame(width: 56, height: 56)
+                            .overlay(Text("MK").font(.system(size: 16, weight: .bold)).foregroundStyle(.white))
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Merchant Admin")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(AppPalette.textPrimary)
+                            Text("admin@widers.com")
+                                .font(.system(size: 13))
+                                .foregroundStyle(AppPalette.textMuted)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(AppPalette.textMuted)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .background(AppPalette.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .padding(.horizontal, 20)
+
+                    Spacer().frame(height: 16)
+                    settingsTitle("ACCOUNT")
+                    flatGroup {
+                        flatRow(icon: "person.fill", iconBg: Color(red: 0.23, green: 0.51, blue: 0.96), label: "Profile", value: nil, onTap: {})
+                    }
+
+                    Spacer().frame(height: 8)
+                    settingsTitle("NOTIFICATION SETTINGS")
+                    flatGroup {
+                        flatToggleRow(icon: "bell.badge.fill", iconBg: Color(red: 0.96, green: 0.25, blue: 0.37), label: tr(vm.locale, .pushNotifications), isOn: $pushEnabled)
+                        sectionDivider()
+                        flatToggleRow(icon: "speaker.wave.3.fill", iconBg: Color(red: 0.96, green: 0.62, blue: 0.04), label: tr(vm.locale, .soundAlerts), isOn: $soundEnabled)
+                    }
+
+                    Spacer().frame(height: 8)
+                    settingsTitle("APPEARANCE")
+                    flatGroup {
+                        flatRow(
+                            icon: "globe",
+                            iconBg: Color(red: 0.02, green: 0.71, blue: 0.83),
+                            label: tr(vm.locale, .language),
+                            value: vm.locale == .en ? "English" : "العربية",
+                            onTap: { showingLanguageDialog = true }
+                        )
+                        sectionDivider()
+                        flatToggleRow(icon: "moon.fill", iconBg: Color(red: 0.39, green: 0.40, blue: 0.95), label: tr(vm.locale, .darkMode), isOn: $vm.darkMode)
+                    }
+
+                    Spacer().frame(height: 8)
+                    settingsTitle("ABOUT")
+                    flatGroup {
+                        flatRow(icon: "shield.fill", iconBg: Color(red: 0.06, green: 0.73, blue: 0.51), label: tr(vm.locale, .privacyPolicy), value: nil, onTap: { vm.setScreen(.privacy) })
+                        sectionDivider()
+                        flatRow(icon: "doc.text.fill", iconBg: Color(red: 0.08, green: 0.72, blue: 0.65), label: tr(vm.locale, .termsOfService), value: nil, onTap: { vm.setScreen(.terms) })
+                        sectionDivider()
+                        flatRow(icon: "info.circle.fill", iconBg: Color(red: 0.39, green: 0.45, blue: 0.55), label: tr(vm.locale, .version), value: "1.0.0", onTap: { vm.setScreen(.version) })
+                    }
+                    Spacer().frame(height: 14)
+                    Button {
+                        showingLogoutAlert = true
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "rectangle.portrait.and.arrow.right")
+                            Text(tr(vm.locale, .logout))
+                                .font(.system(size: 16, weight: .medium))
+                        }
+                        .foregroundStyle(Color(red: 0.94, green: 0.27, blue: 0.27))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(Color(red: 0.94, green: 0.27, blue: 0.27).opacity(0.10))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .padding(.horizontal, 20)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.top, 12)
+                .padding(.bottom, 20)
+            }
         }
         .alert(tr(vm.locale, .logout), isPresented: $showingLogoutAlert) {
             Button(tr(vm.locale, .cancel), role: .cancel) {}
@@ -393,84 +441,141 @@ private struct SettingsView: View {
         } message: {
             Text(tr(vm.locale, .logoutConfirm))
         }
-    }
-
-    @ViewBuilder
-    private func section(title: String, @ViewBuilder content: () -> some View) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(AppPalette.textMuted)
-            card { content() }
+        .confirmationDialog(tr(vm.locale, .language), isPresented: $showingLanguageDialog, titleVisibility: .visible) {
+            Button("English") { vm.locale = .en }
+            Button("العربية") { vm.locale = .ar }
+            Button(tr(vm.locale, .cancel), role: .cancel) {}
         }
     }
 
     @ViewBuilder
-    private func card(@ViewBuilder content: () -> some View) -> some View {
-        VStack(spacing: 12) { content() }
-            .padding(14)
-            .background(AppPalette.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+    private func settingsTitle(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(AppPalette.textMuted)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 3)
     }
 
     @ViewBuilder
-    private func settingsLink(_ title: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack {
-                Text(title).foregroundStyle(AppPalette.textPrimary)
+    private func flatGroup(@ViewBuilder content: () -> some View) -> some View {
+        VStack(spacing: 0) { content() }
+            .background(AppPalette.surface)
+    }
+
+    @ViewBuilder
+    private func flatRow(icon: String, iconBg: Color, label: String, value: String?, onTap: @escaping () -> Void) -> some View {
+        Button(action: onTap) {
+            HStack(spacing: 0) {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(iconBg)
+                    .frame(width: 32, height: 32)
+                    .overlay(Image(systemName: icon).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white))
+
+                Spacer().frame(width: 10)
+                Text(label)
+                    .font(.system(size: 16))
+                    .foregroundStyle(AppPalette.textPrimary)
                 Spacer()
-                Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(AppPalette.textMuted)
+                if let value {
+                    Text(value)
+                        .font(.system(size: 13))
+                        .foregroundStyle(AppPalette.textMuted)
+                    Spacer().frame(width: 8)
+                }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(AppPalette.textMuted)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 11)
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func flatToggleRow(icon: String, iconBg: Color, label: String, isOn: Binding<Bool>) -> some View {
+        HStack(spacing: 0) {
+            RoundedRectangle(cornerRadius: 10)
+                .fill(iconBg)
+                .frame(width: 32, height: 32)
+                .overlay(Image(systemName: icon).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white))
+            Spacer().frame(width: 10)
+            Text(label)
+                .font(.system(size: 16))
+                .foregroundStyle(AppPalette.textPrimary)
+            Spacer()
+            Toggle("", isOn: isOn)
+                .labelsHidden()
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 9)
+    }
+
+    @ViewBuilder
+    private func sectionDivider() -> some View {
+        Divider()
+            .overlay(AppPalette.border.opacity(0.55))
+            .padding(.leading, 62)
+    }
+}
+
+private struct PrivacyPolicyView: View {
+    @ObservedObject var vm: AppViewModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            AppBackHeader(title: tr(vm.locale, .privacyPolicy)) { vm.setScreen(.settings) }
+
+            ScrollView {
+                VStack(spacing: 0) {
+                    PolicyHero(
+                        date: "February 25, 2026",
+                        intro: "Widers is committed to protecting your privacy. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use our WhatsApp Business Cloud API platform and mobile application."
+                    )
+
+                    ForEach(Array(privacySections.enumerated()), id: \.offset) { idx, item in
+                        PolicySectionCard(
+                            icon: item.icon,
+                            iconTint: Color(red: 0.06, green: 0.73, blue: 0.51),
+                            title: item.title,
+                            body: item.body,
+                            index: idx + 1
+                        )
+                    }
+                }
             }
         }
     }
 }
 
-private struct InfoPageView: View {
+private struct TermsOfServiceView: View {
     @ObservedObject var vm: AppViewModel
-    let title: String
-    let sections: [(String, String)]
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 14) {
-                topBar
-                hero(title: title)
-                ForEach(Array(sections.enumerated()), id: \.offset) { _, item in
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(item.0).font(.system(size: 16, weight: .semibold)).foregroundStyle(AppPalette.textPrimary)
-                        Text(item.1).font(.system(size: 14)).foregroundStyle(AppPalette.textSecondary)
+        VStack(spacing: 0) {
+            AppBackHeader(title: tr(vm.locale, .termsOfService)) { vm.setScreen(.settings) }
+
+            ScrollView {
+                VStack(spacing: 0) {
+                    PolicyHero(
+                        date: "February 25, 2026",
+                        intro: "These Terms of Service govern your access and use of the Widers platform, including our WhatsApp Business Cloud API services and mobile application."
+                    )
+
+                    ForEach(Array(termsSections.enumerated()), id: \.offset) { idx, item in
+                        PolicySectionCard(
+                            icon: item.icon,
+                            iconTint: Color(red: 0.05, green: 0.65, blue: 0.91),
+                            title: item.title,
+                            body: item.body,
+                            index: idx + 1
+                        )
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(14)
-                    .background(AppPalette.surface)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
                 }
             }
-            .padding(16)
         }
-    }
-
-    private var topBar: some View {
-        HStack {
-            Button { vm.setScreen(.settings) } label: {
-                Image(systemName: "chevron.left")
-                    .foregroundStyle(AppPalette.textPrimary)
-            }
-            Spacer()
-            Text(title).font(.system(size: 16, weight: .semibold)).foregroundStyle(AppPalette.textPrimary)
-            Spacer()
-            Color.clear.frame(width: 18, height: 18)
-        }
-    }
-
-    @ViewBuilder
-    private func hero(title: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("LAST UPDATED").font(.system(size: 11, weight: .bold)).foregroundStyle(AppPalette.primary)
-            Text(title).font(.system(size: 22, weight: .bold)).foregroundStyle(AppPalette.textPrimary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(AppPalette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 }
 
@@ -478,33 +583,188 @@ private struct VersionView: View {
     @ObservedObject var vm: AppViewModel
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 14) {
-                HStack {
-                    Button { vm.setScreen(.settings) } label: {
-                        Image(systemName: "chevron.left")
-                            .foregroundStyle(AppPalette.textPrimary)
-                    }
-                    Spacer()
-                    Text(tr(vm.locale, .version)).font(.system(size: 16, weight: .semibold)).foregroundStyle(AppPalette.textPrimary)
-                    Spacer()
-                    Color.clear.frame(width: 18, height: 18)
-                }
+        VStack(spacing: 0) {
+            AppBackHeader(title: vm.locale == .ar ? "حول وايدرز" : "About Widers") { vm.setScreen(.settings) }
 
-                VStack(spacing: 8) {
-                    RoundedRectangle(cornerRadius: 14)
-                        .fill(AppPalette.primary)
-                        .frame(width: 60, height: 60)
-                        .overlay(Text("W").font(.system(size: 26, weight: .bold)).foregroundStyle(.white))
-                    Text("Widers").font(.system(size: 20, weight: .bold)).foregroundStyle(AppPalette.textPrimary)
-                    Text("v1.0.0").font(.system(size: 13)).foregroundStyle(AppPalette.textMuted)
+            ScrollView {
+                VStack(spacing: 12) {
+                    VStack(spacing: 10) {
+                        RoundedRectangle(cornerRadius: 18)
+                            .fill(AppPalette.primary)
+                            .frame(width: 80, height: 80)
+                            .overlay(Image(systemName: "bubble.left.and.bubble.right").font(.system(size: 32, weight: .medium)).foregroundStyle(.white))
+
+                        Text("Widers")
+                            .font(.system(size: 28, weight: .bold))
+                            .foregroundStyle(AppPalette.textPrimary)
+                        Text("META APPROVED PARTNER")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(AppPalette.primary)
+                        Text(
+                            vm.locale == .ar
+                                ? "وايدرز منصة معتمدة من ميتا لإدارة محادثات واتساب للأعمال في الوقت الفعلي مع فرق متعددة."
+                                : "Widers is a Meta-approved WhatsApp Business Cloud API provider helping teams manage customer conversations at scale."
+                        )
+                        .font(.system(size: 16))
+                        .foregroundStyle(AppPalette.textMuted)
+                        .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(16)
+                    .background(AppPalette.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: 18))
+
+                    VStack(spacing: 0) {
+                        versionInfoRow("Version", "1.0.0")
+                        versionInfoRow("Build", "2026.02.25")
+                        versionInfoRow("Environment", "Production")
+                        versionInfoRow("API Version", "v2.0")
+                        versionInfoRow("WhatsApp Cloud API", "v21.0", drawDivider: false)
+                    }
+                    .background(AppPalette.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("KEY FEATURES")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(AppPalette.textMuted)
+
+                        VStack(spacing: 10) {
+                            ForEach(versionFeatures, id: \.self) { feature in
+                                HStack(alignment: .center, spacing: 10) {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(AppPalette.primary)
+                                    Text(feature)
+                                        .font(.system(size: 15))
+                                        .foregroundStyle(AppPalette.textPrimary)
+                                    Spacer()
+                                }
+                            }
+                        }
+                        .padding(14)
+                        .background(AppPalette.surface)
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity)
-                .padding(16)
-                .background(AppPalette.surface)
-                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
             }
-            .padding(16)
+        }
+    }
+}
+
+private struct AppBackHeader: View {
+    let title: String
+    let onBack: () -> Void
+
+    var body: some View {
+        HStack {
+            Button(action: onBack) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(AppPalette.textPrimary)
+            }
+            Spacer()
+            Text(title)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(AppPalette.textPrimary)
+            Spacer()
+            Color.clear.frame(width: 16, height: 16)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(AppPalette.surface)
+    }
+}
+
+private struct PolicyHero: View {
+    let date: String
+    let intro: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                Rectangle().fill(AppPalette.border.opacity(0.9)).frame(height: 1)
+                Text("LAST UPDATED")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(AppPalette.textMuted)
+                Rectangle().fill(AppPalette.border.opacity(0.9)).frame(height: 1)
+            }
+
+            Text(date)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(AppPalette.textPrimary)
+                .padding(.top, 8)
+
+            Text(intro)
+                .font(.system(size: 14))
+                .foregroundStyle(AppPalette.textMuted)
+                .padding(.top, 12)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
+        .background(AppPalette.secondarySoft)
+    }
+}
+
+private struct PolicySectionCard: View {
+    let icon: String
+    let iconTint: Color
+    let title: String
+    let body: String
+    let index: Int
+
+    var bodyView: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .center, spacing: 0) {
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(iconTint.opacity(0.10))
+                    .frame(width: 36, height: 36)
+                    .overlay(Image(systemName: icon).font(.system(size: 15, weight: .semibold)).foregroundStyle(iconTint))
+                Text(title)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(AppPalette.textPrimary)
+                    .padding(.leading, 10)
+                Spacer()
+                Text(String(format: "%02d", index))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(AppPalette.textMuted)
+            }
+            Text(body)
+                .font(.system(size: 14))
+                .foregroundStyle(AppPalette.textMuted)
+                .padding(.top, 8)
+        }
+        .padding(14)
+        .background(AppPalette.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+
+    var body: some View {
+        bodyView
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+    }
+}
+
+@ViewBuilder
+private func versionInfoRow(_ label: String, _ value: String, drawDivider: Bool = true) -> some View {
+    VStack(spacing: 0) {
+        HStack {
+            Text(label)
+                .font(.system(size: 15))
+                .foregroundStyle(AppPalette.textMuted)
+            Spacer()
+            Text(value)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(AppPalette.textPrimary)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        if drawDivider {
+            Divider().overlay(AppPalette.border.opacity(0.6))
         }
     }
 }
@@ -701,6 +961,7 @@ private enum AppPalette {
     static let primary = Color(red: 0.07, green: 0.60, blue: 0.42)
     static let background = Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 0.06, green: 0.08, blue: 0.11, alpha: 1) : UIColor(red: 0.97, green: 0.98, blue: 0.99, alpha: 1) })
     static let surface = Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 0.11, green: 0.14, blue: 0.18, alpha: 1) : UIColor.white })
+    static let secondarySoft = Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 0.22, green: 0.25, blue: 0.30, alpha: 1) : UIColor(red: 0.89, green: 0.93, blue: 0.97, alpha: 1) })
     static let card = Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 0.16, green: 0.19, blue: 0.24, alpha: 1) : UIColor(red: 0.94, green: 0.96, blue: 0.98, alpha: 1) })
     static let textPrimary = Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 0.95, green: 0.97, blue: 0.99, alpha: 1) : UIColor(red: 0.06, green: 0.09, blue: 0.16, alpha: 1) })
     static let textSecondary = Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 0.82, green: 0.86, blue: 0.90, alpha: 1) : UIColor(red: 0.20, green: 0.25, blue: 0.33, alpha: 1) })
@@ -708,35 +969,41 @@ private enum AppPalette {
     static let border = Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(white: 1, alpha: 0.14) : UIColor(red: 0.88, green: 0.91, blue: 0.94, alpha: 1) })
 }
 
-private func privacySections(_ locale: AppLocale) -> [(String, String)] {
-    if locale == .ar {
-        return [
-            ("جمع البيانات", "نجمع معلومات أساسية لتحسين الدعم وتجربة الرسائل."),
-            ("استخدام البيانات", "تُستخدم البيانات لإدارة المحادثات وتقديم خدمة أفضل."),
-            ("أمن المعلومات", "نستخدم ممارسات قياسية لحماية البيانات من الوصول غير المصرح."),
-        ]
-    }
-    return [
-        ("Data Collection", "We collect essential data to improve support quality and messaging workflows."),
-        ("Data Usage", "Data is used to manage conversations and provide better customer support."),
-        ("Information Security", "We apply standard safeguards to protect data from unauthorized access."),
-    ]
+private struct PolicySectionData {
+    let icon: String
+    let title: String
+    let body: String
 }
 
-private func termsSections(_ locale: AppLocale) -> [(String, String)] {
-    if locale == .ar {
-        return [
-            ("استخدام الخدمة", "باستخدام التطبيق فأنت توافق على الالتزام بسياسات المنصة."),
-            ("مسؤولية الحساب", "أنت مسؤول عن حماية بيانات الدخول واستخدام الحساب بشكل صحيح."),
-            ("التحديثات", "قد نقوم بتحديث الشروط دورياً، واستمرار الاستخدام يعني الموافقة."),
-        ]
-    }
-    return [
-        ("Service Usage", "By using the app, you agree to follow the platform policies and applicable laws."),
-        ("Account Responsibility", "You are responsible for your credentials and all activity under your account."),
-        ("Updates", "Terms may be updated periodically; continued use implies acceptance."),
-    ]
-}
+private let privacySections: [PolicySectionData] = [
+    .init(icon: "eye.fill", title: "Information We Collect", body: "We collect information you provide directly, including your name, email address, phone number, and business details when you register for an account. We also collect message content, conversation metadata, and usage analytics to provide and improve our services."),
+    .init(icon: "internaldrive.fill", title: "How We Use Your Information", body: "We use the information we collect to operate, maintain, and provide platform features, including routing and managing WhatsApp Business messages, enabling team collaboration through internal notes, and sending service-related notifications."),
+    .init(icon: "lock.fill", title: "Data Storage & Security", body: "Your data is stored on secure servers with encryption at rest and in transit. We implement role-based access controls, regular security checks, and automated threat detection."),
+    .init(icon: "globe", title: "WhatsApp & Meta Compliance", body: "As a Meta-approved WhatsApp Business Cloud API provider, we comply with Meta Platform Terms and WhatsApp Business policies."),
+    .init(icon: "shield.fill", title: "Third-Party Services", body: "We may share data with trusted third-party providers who assist us in operating our platform under confidentiality agreements."),
+    .init(icon: "checkmark.shield.fill", title: "Your Rights", body: "You can request access, correction, or deletion of your personal data by contacting support."),
+    .init(icon: "envelope.fill", title: "Contact Us", body: "privacy@widers.com")
+]
+
+private let termsSections: [PolicySectionData] = [
+    .init(icon: "person.crop.circle.fill", title: "Account Registration", body: "To use Widers, you must register for a merchant account and provide accurate information. You are responsible for keeping account credentials secure."),
+    .init(icon: "shield.fill", title: "Acceptable Use", body: "You agree to use the service only for lawful purposes and in compliance with WhatsApp Business policies. No spam, abuse, or impersonation."),
+    .init(icon: "creditcard.fill", title: "Subscription & Billing", body: "Access to Widers is subscription-based. Plans are billed monthly or annually according to the selected package."),
+    .init(icon: "clock.fill", title: "Service Level Agreement", body: "We strive to maintain high platform uptime. Scheduled maintenance windows will be communicated in advance."),
+    .init(icon: "doc.text.fill", title: "Intellectual Property", body: "Widers platform design and features are protected. You retain ownership of your own customer content and messages."),
+    .init(icon: "exclamationmark.triangle.fill", title: "Limitation of Liability", body: "To the maximum extent permitted by law, Widers is not liable for indirect or consequential damages."),
+    .init(icon: "xmark.octagon.fill", title: "Termination", body: "Either party may terminate the service. Data retention and deletion policies apply as defined in the agreement."),
+    .init(icon: "building.columns.fill", title: "Governing Law", body: "Any disputes are resolved according to applicable governing law and dispute-resolution terms.")
+]
+
+private let versionFeatures: [String] = [
+    "Real-time WhatsApp Business messaging",
+    "Multi-agent conversation management",
+    "Internal notes and team collaboration",
+    "Conversation analytics and reporting",
+    "Automated message routing and assignment",
+    "Template message management"
+]
 
 #Preview {
     AppRootView()
