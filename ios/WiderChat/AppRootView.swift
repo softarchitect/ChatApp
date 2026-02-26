@@ -62,28 +62,17 @@ private struct LoginView: View {
             VStack(spacing: 18) {
                 Spacer(minLength: 32)
 
-                RoundedRectangle(cornerRadius: 18)
-                    .fill(AppPalette.primary)
-                    .frame(width: 72, height: 72)
-                    .overlay(Text("W").font(.system(size: 32, weight: .bold)).foregroundStyle(.white))
+                Image("SplashLogo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 110, height: 110)
+                    .clipShape(RoundedRectangle(cornerRadius: 18))
 
-                Text(tr(vm.locale, .appName))
-                    .font(.system(size: 26, weight: .bold))
-                    .foregroundStyle(AppPalette.textPrimary)
                 Text(tr(vm.locale, .appTagline))
                     .font(.system(size: 13))
                     .foregroundStyle(AppPalette.textMuted)
 
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(tr(vm.locale, .loginTitle))
-                        .font(.system(size: 24, weight: .bold))
-                        .foregroundStyle(AppPalette.textPrimary)
-                    Text(tr(vm.locale, .loginSubtitle))
-                        .font(.system(size: 14))
-                        .foregroundStyle(AppPalette.textMuted)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, 8)
+                Spacer().frame(height: 10)
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text(tr(vm.locale, .emailLabel)).font(.system(size: 13, weight: .medium)).foregroundStyle(AppPalette.textSecondary)
@@ -594,10 +583,11 @@ private struct VersionView: View {
             ScrollView {
                 VStack(spacing: 12) {
                     VStack(spacing: 10) {
-                        RoundedRectangle(cornerRadius: 18)
-                            .fill(AppPalette.primary)
-                            .frame(width: 80, height: 80)
-                            .overlay(Image(systemName: "bubble.left.and.bubble.right").font(.system(size: 32, weight: .medium)).foregroundStyle(.white))
+                        Image("SplashLogo")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 128, height: 128)
+                            .clipShape(RoundedRectangle(cornerRadius: 18))
 
                         Text("Widers")
                             .font(.system(size: 28, weight: .bold))
