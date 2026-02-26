@@ -1,0 +1,138 @@
+package com.widers.widerchat.ui.screens
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import com.widers.widerchat.domain.model.AppLocale
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun VersionScreen(
+    modifier: Modifier = Modifier,
+    locale: AppLocale,
+    onBack: () -> Unit
+) {
+    val title = if (locale == AppLocale.AR) "حول وايدرز" else "About Widers"
+    val description = if (locale == AppLocale.AR) {
+        "وايدرز منصة معتمدة من ميتا لإدارة محادثات واتساب للأعمال في الوقت الفعلي مع فرق متعددة."
+    } else {
+        "Widers is a Meta-approved WhatsApp Business Cloud API provider helping teams manage customer conversations at scale."
+    }
+    val features = listOf(
+        "Real-time WhatsApp Business messaging",
+        "Multi-agent conversation management",
+        "Internal notes and team collaboration",
+        "Conversation analytics and reporting",
+        "Automated message routing and assignment",
+        "Template message management"
+    )
+
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        topBar = {
+            TopAppBar(
+                title = { Text(title, fontWeight = FontWeight.SemiBold) },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, null) } }
+            )
+        }
+    ) { pad ->
+        Column(
+            modifier = Modifier
+                .padding(pad)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Card(
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Card(
+                        shape = RoundedCornerShape(18.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary)
+                    ) {
+                        Icon(
+                            Icons.Outlined.ChatBubbleOutline,
+                            null,
+                            modifier = Modifier.size(80.dp).padding(20.dp),
+                            tint = MaterialTheme.colorScheme.onPrimary
+                        )
+                    }
+                    Text("Widers", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 10.dp))
+                    Text("META APPROVED PARTNER", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                    Text(
+                        description,
+                        modifier = Modifier.padding(top = 10.dp),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+
+            Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+                Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                    InfoRow("Version", "1.0.0")
+                    InfoRow("Build", "2026.02.25")
+                    InfoRow("Environment", "Production")
+                    InfoRow("API Version", "v2.0")
+                    InfoRow("WhatsApp Cloud API", "v21.0")
+                }
+            }
+
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text("KEY FEATURES", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Card(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), shape = RoundedCornerShape(16.dp)) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        for (f in features) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Outlined.CheckCircle, null, tint = MaterialTheme.colorScheme.primary)
+                                Text(f, modifier = Modifier.padding(start = 10.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun InfoRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, fontWeight = FontWeight.Medium)
+    }
+}

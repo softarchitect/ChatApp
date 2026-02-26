@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+web/node_modules/
+
+# Build and runtime outputs
+.next/
+web/.next/
+dist/
+build/
+coverage/
+*.log
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Android
+android/.gradle/
+android/local.properties
+android/.idea/
+android/app/build/
+android/build/
+*.iml
+
+# iOS
+ios/Pods/
+ios/build/
+ios/DerivedData/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+*.xcworkspace/xcuserdata/
+*.xcuserdatad/
+*.xcuserstate
+
+# Editor and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+Widers API updated.postman_collection.json
+web/
