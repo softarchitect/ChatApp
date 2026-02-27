@@ -7,6 +7,9 @@ plugins {
 android {
     namespace = "com.widers.widerchat"
     compileSdk = 36
+    val apiBaseUrlProvider = providers.gradleProperty("API_BASE_URL")
+        .orElse(providers.environmentVariable("API_BASE_URL"))
+        .orElse("https://apps.widers.net")
 
     defaultConfig {
         applicationId = "com.widers.widerchat"
@@ -16,6 +19,7 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "API_BASE_URL", "\"${apiBaseUrlProvider.get()}\"")
     }
 
     buildTypes {
@@ -36,6 +40,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -51,6 +56,7 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons.extended)
+    implementation(libs.androidx.security.crypto)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

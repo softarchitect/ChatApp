@@ -15,8 +15,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Logout
+import androidx.compose.material.icons.automirrored.outlined.Reply
 import androidx.compose.material.icons.automirrored.outlined.VolumeUp
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Description
@@ -26,6 +29,9 @@ import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Sync
+import androidx.compose.material.icons.outlined.Tag
+import androidx.compose.material.icons.outlined.PersonAdd
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -53,17 +59,39 @@ fun SettingsScreen(
     modifier: Modifier = Modifier,
     locale: AppLocale,
     darkMode: Boolean,
+    profileName: String,
+    profileEmail: String,
     onLocaleChange: (AppLocale) -> Unit,
     onDarkModeChange: (Boolean) -> Unit,
     onOpenPrivacy: () -> Unit,
     onOpenTerms: () -> Unit,
     onOpenVersion: () -> Unit,
-    onLogout: () -> Unit
+    onLogout: () -> Unit,
+    onSyncSupportData: () -> Unit,
+    onCreateTag: (String, String, Long?) -> Unit,
+    onCreateReply: (String, String, Long?) -> Unit,
+    onAddContact: (String, String, String?) -> Unit,
+    actionStatus: String?
 ) {
     var pushEnabled by remember { mutableStateOf(true) }
     var soundEnabled by remember { mutableStateOf(true) }
     var showLangDialog by remember { mutableStateOf(false) }
     var showLogoutDialog by remember { mutableStateOf(false) }
+    var showTagDialog by remember { mutableStateOf(false) }
+    var showReplyDialog by remember { mutableStateOf(false) }
+    var showContactDialog by remember { mutableStateOf(false) }
+    var tagName by remember { mutableStateOf("") }
+    var tagColor by remember { mutableStateOf("#ffffff") }
+    var tagId by remember { mutableStateOf("") }
+    var replyName by remember { mutableStateOf("") }
+    var replyText by remember { mutableStateOf("") }
+    var replyId by remember { mutableStateOf("") }
+    var contactName by remember { mutableStateOf("") }
+    var contactPhone by remember { mutableStateOf("") }
+    var contactEmail by remember { mutableStateOf("") }
+    val accountName = profileName.trim().ifBlank { "Account" }
+    val accountEmail = profileEmail.trim().ifBlank { "-" }
+    val avatarInitials = remember(accountName) { initialsFrom(accountName) }
 
     Column(modifier = modifier.fillMaxSize()) {
         Column(
@@ -75,7 +103,11 @@ fun SettingsScreen(
             Text(tr(locale, TextKey.SETTINGS), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         }
 
-        Column(modifier = Modifier.padding(top = 12.dp)) {
+        Column(
+            modifier = Modifier
+                .padding(top = 12.dp)
+                .verticalScroll(rememberScrollState())
+        ) {
             Surface(
                 modifier = Modifier.padding(horizontal = 20.dp),
                 shape = RoundedCornerShape(16.dp),
@@ -89,13 +121,13 @@ fun SettingsScreen(
                 ) {
                     Surface(modifier = Modifier.size(56.dp), shape = CircleShape, color = MaterialTheme.colorScheme.primary) {
                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text("MK", color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold)
+                            Text(avatarInitials, color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold)
                         }
                     }
                     Spacer(Modifier.size(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Merchant Admin", fontWeight = FontWeight.SemiBold)
-                        Text("admin@widers.com", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(accountName, fontWeight = FontWeight.SemiBold)
+                        Text(accountEmail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Icon(Icons.Outlined.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -121,6 +153,28 @@ fun SettingsScreen(
                 FlatRow(icon = { Icon(Icons.Outlined.Language, null, tint = Color.White) }, iconBg = Color(0xFF06B6D4), label = tr(locale, TextKey.LANGUAGE), value = if (locale == AppLocale.EN) "English" else "العربية", onClick = { showLangDialog = true })
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
                 FlatToggleRow(icon = { Icon(Icons.Outlined.DarkMode, null, tint = Color.White) }, iconBg = Color(0xFF6366F1), label = tr(locale, TextKey.DARK_MODE), checked = darkMode, onCheckedChange = onDarkModeChange)
+            }
+
+            Spacer(Modifier.height(8.dp))
+            SettingsTitle("BACKEND TOOLS")
+            FlatGroup {
+                FlatRow(icon = { Icon(Icons.Outlined.Sync, null, tint = Color.White) }, iconBg = Color(0xFF0E8C56), label = "Sync support data", onClick = onSyncSupportData)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
+                FlatRow(icon = { Icon(Icons.Outlined.Tag, null, tint = Color.White) }, iconBg = Color(0xFF7C3AED), label = "Create / Update Tag", onClick = { showTagDialog = true })
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
+                FlatRow(icon = { Icon(Icons.AutoMirrored.Outlined.Reply, null, tint = Color.White) }, iconBg = Color(0xFF0284C7), label = "Create / Update Reply", onClick = { showReplyDialog = true })
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
+                FlatRow(icon = { Icon(Icons.Outlined.PersonAdd, null, tint = Color.White) }, iconBg = Color(0xFFF59E0B), label = "Add Contact", onClick = { showContactDialog = true })
+            }
+
+            if (!actionStatus.isNullOrBlank()) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    actionStatus,
+                    modifier = Modifier.padding(horizontal = 20.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
             }
 
             Spacer(Modifier.height(8.dp))
@@ -182,6 +236,81 @@ fun SettingsScreen(
             }
         )
     }
+
+    if (showTagDialog) {
+        AlertDialog(
+            onDismissRequest = { showTagDialog = false },
+            title = { Text("Create / Update Tag") },
+            text = {
+                Column {
+                    androidx.compose.material3.OutlinedTextField(tagName, { tagName = it }, label = { Text("Tag name") })
+                    Spacer(Modifier.size(8.dp))
+                    androidx.compose.material3.OutlinedTextField(tagColor, { tagColor = it }, label = { Text("Tag color #hex") })
+                    Spacer(Modifier.size(8.dp))
+                    androidx.compose.material3.OutlinedTextField(tagId, { tagId = it }, label = { Text("Tag ID (optional)") })
+                }
+            },
+            dismissButton = { TextButton(onClick = { showTagDialog = false }) { Text("Cancel") } },
+            confirmButton = {
+                TextButton(onClick = {
+                    onCreateTag(tagName, tagColor, tagId.toLongOrNull())
+                    showTagDialog = false
+                }) { Text("Save") }
+            }
+        )
+    }
+
+    if (showReplyDialog) {
+        AlertDialog(
+            onDismissRequest = { showReplyDialog = false },
+            title = { Text("Create / Update Reply") },
+            text = {
+                Column {
+                    androidx.compose.material3.OutlinedTextField(replyName, { replyName = it }, label = { Text("Reply name") })
+                    Spacer(Modifier.size(8.dp))
+                    androidx.compose.material3.OutlinedTextField(replyText, { replyText = it }, label = { Text("Reply text") })
+                    Spacer(Modifier.size(8.dp))
+                    androidx.compose.material3.OutlinedTextField(replyId, { replyId = it }, label = { Text("Reply ID (optional)") })
+                }
+            },
+            dismissButton = { TextButton(onClick = { showReplyDialog = false }) { Text("Cancel") } },
+            confirmButton = {
+                TextButton(onClick = {
+                    onCreateReply(replyName, replyText, replyId.toLongOrNull())
+                    showReplyDialog = false
+                }) { Text("Save") }
+            }
+        )
+    }
+
+    if (showContactDialog) {
+        AlertDialog(
+            onDismissRequest = { showContactDialog = false },
+            title = { Text("Add Contact") },
+            text = {
+                Column {
+                    androidx.compose.material3.OutlinedTextField(contactName, { contactName = it }, label = { Text("Name") })
+                    Spacer(Modifier.size(8.dp))
+                    androidx.compose.material3.OutlinedTextField(contactPhone, { contactPhone = it }, label = { Text("Phone") })
+                    Spacer(Modifier.size(8.dp))
+                    androidx.compose.material3.OutlinedTextField(contactEmail, { contactEmail = it }, label = { Text("Email (optional)") })
+                }
+            },
+            dismissButton = { TextButton(onClick = { showContactDialog = false }) { Text("Cancel") } },
+            confirmButton = {
+                TextButton(onClick = {
+                    onAddContact(contactName, contactPhone, contactEmail.ifBlank { null })
+                    showContactDialog = false
+                }) { Text("Add") }
+            }
+        )
+    }
+}
+
+private fun initialsFrom(name: String): String {
+    val parts = name.trim().split(" ").filter { it.isNotBlank() }
+    if (parts.isEmpty()) return "U"
+    return parts.take(2).mapNotNull { it.firstOrNull()?.uppercaseChar() }.joinToString("")
 }
 
 @Composable

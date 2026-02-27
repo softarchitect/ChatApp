@@ -19,13 +19,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -43,16 +46,29 @@ import com.widers.widerchat.core.tr
 import com.widers.widerchat.domain.model.AppLocale
 import com.widers.widerchat.domain.model.Conversation
 import com.widers.widerchat.domain.model.ConversationStatus
+import com.widers.widerchat.ui.NewConversationContact
 
 @Composable
 fun ConversationsScreen(
     modifier: Modifier = Modifier,
     locale: AppLocale,
     conversations: List<Conversation>,
-    onOpenChat: (String) -> Unit
+    contacts: List<NewConversationContact>,
+    contactsLoading: Boolean,
+    onOpenChat: (String) -> Unit,
+    onSearchChats: (String) -> Unit,
+    onLoadContacts: () -> Unit,
+    onSearchContacts: (String) -> Unit,
+    onStartConversationForContact: (NewConversationContact) -> Unit,
+    onStartNewConversation: (String, String) -> Unit,
+    actionStatus: String?
 ) {
     var search by remember { mutableStateOf("") }
     var tab by remember { mutableStateOf("all") }
+    var showNewConversationDialog by remember { mutableStateOf(false) }
+    var newName by remember { mutableStateOf("") }
+    var newPhone by remember { mutableStateOf("") }
+    var contactSearch by remember { mutableStateOf("") }
 
     val filtered = conversations.filter {
         val tabOk = when (tab) {
@@ -91,7 +107,12 @@ fun ConversationsScreen(
                     modifier = Modifier
                         .size(40.dp)
                         .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+                        .clickable {
+                            showNewConversationDialog = true
+                            contactSearch = ""
+                            onLoadContacts()
+                        },
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(Icons.Outlined.ChatBubbleOutline, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
@@ -101,7 +122,10 @@ fun ConversationsScreen(
             Spacer(Modifier.height(14.dp))
             TextField(
                 value = search,
-                onValueChange = { search = it },
+                onValueChange = {
+                    search = it
+                    onSearchChats(it)
+                },
                 modifier = Modifier.fillMaxWidth().height(48.dp),
                 leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
                 placeholder = { Text(tr(locale, TextKey.SEARCH_PLACEHOLDER), color = MaterialTheme.colorScheme.onSurfaceVariant) },
@@ -114,6 +138,14 @@ fun ConversationsScreen(
                     unfocusedIndicatorColor = Color.Transparent
                 )
             )
+            if (!actionStatus.isNullOrBlank()) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    actionStatus,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
             Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 TabChip(tr(locale, TextKey.ALL), conversations.size, tab == "all") { tab = "all" }
@@ -137,10 +169,105 @@ fun ConversationsScreen(
         } else {
             LazyColumn {
                 items(filtered, key = { it.id }) { convo ->
-                    ConversationRow(convo = convo, onClick = { onOpenChat(convo.id) })
+                    ConversationRow(
+                        convo = convo,
+                        locale = locale,
+                        onClick = { onOpenChat(convo.id) }
+                    )
                 }
             }
         }
+    }
+
+    if (showNewConversationDialog) {
+        AlertDialog(
+            onDismissRequest = { showNewConversationDialog = false },
+            title = { Text(tr(locale, TextKey.NEW_CONVERSATION_TITLE)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = newName,
+                        onValueChange = { newName = it },
+                        singleLine = true,
+                        label = { Text(tr(locale, TextKey.NAME_LABEL)) }
+                    )
+                    OutlinedTextField(
+                        value = newPhone,
+                        onValueChange = { newPhone = it },
+                        singleLine = true,
+                        label = { Text(tr(locale, TextKey.PHONE_LABEL)) }
+                    )
+                    OutlinedTextField(
+                        value = contactSearch,
+                        onValueChange = {
+                            contactSearch = it
+                            onSearchContacts(it)
+                        },
+                        singleLine = true,
+                        label = { Text("Search contacts") }
+                    )
+                    Text(
+                        text = tr(locale, TextKey.NEW_CONVERSATION_MESSAGE),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    if (contactsLoading) {
+                        Text(
+                            text = "Loading contacts...",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        contacts
+                            .filter { item ->
+                                val qName = contactSearch.trim().lowercase()
+                                val qPhone = contactSearch.filter { it.isDigit() }
+                                val nameMatch = qName.isBlank() || item.name.lowercase().contains(qName)
+                                val phoneMatch = qPhone.isBlank() || item.phone.filter { it.isDigit() }.contains(qPhone)
+                                nameMatch && phoneMatch
+                            }
+                            .take(8)
+                            .forEach { item ->
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            onStartConversationForContact(item)
+                                            showNewConversationDialog = false
+                                            newName = ""
+                                            newPhone = ""
+                                        }
+                                        .padding(vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(item.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(
+                                        item.phone,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showNewConversationDialog = false }) { Text(tr(locale, TextKey.CANCEL)) }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onStartNewConversation(newName, newPhone)
+                        showNewConversationDialog = false
+                        newName = ""
+                        newPhone = ""
+                    },
+                    enabled = newName.isNotBlank() && newPhone.isNotBlank()
+                ) { Text(tr(locale, TextKey.CREATE)) }
+            }
+        )
     }
 }
 
@@ -181,7 +308,7 @@ private fun TabChip(label: String, count: Int, selected: Boolean, onClick: () ->
 }
 
 @Composable
-private fun ConversationRow(convo: Conversation, onClick: () -> Unit) {
+private fun ConversationRow(convo: Conversation, locale: AppLocale, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -220,7 +347,7 @@ private fun ConversationRow(convo: Conversation, onClick: () -> Unit) {
             Spacer(Modifier.height(2.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(
-                    convo.lastMessage,
+                    localizedConversationPreview(convo.lastMessage, locale),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.bodyMedium,
@@ -238,6 +365,18 @@ private fun ConversationRow(convo: Conversation, onClick: () -> Unit) {
                 }
             }
         }
+    }
+}
+
+private fun localizedConversationPreview(value: String, locale: AppLocale): String {
+    if (locale != AppLocale.AR) return value
+    return when (value.trim()) {
+        "Photo" -> "صورة"
+        "Video" -> "فيديو"
+        "Voice message" -> "رسالة صوتية"
+        "Document" -> "مستند"
+        "Media" -> "وسائط"
+        else -> value
     }
 }
 

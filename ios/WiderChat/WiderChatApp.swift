@@ -7,11 +7,5 @@
 
 import SwiftUI
 
-@main
-struct WiderChatApp: App {
-    var body: some Scene {
-        WindowGroup {
-            AppRootView()
-        }
-    }
-}
+// Legacy compatibility file.
+// App entrypoint moved to `App/WiderChatApp.swift`.

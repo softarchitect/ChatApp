@@ -50,14 +50,14 @@ import com.widers.widerchat.domain.model.AppLocale
 @Composable
 fun LoginScreen(
     locale: AppLocale,
+    loading: Boolean,
+    hasError: Boolean,
     onToggleLocale: () -> Unit,
-    onLogin: (String, String) -> Boolean
+    onLogin: (String, String) -> Unit
 ) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var showPassword by remember { mutableStateOf(false) }
-    var hasError by remember { mutableStateOf(false) }
-    var loading by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -107,7 +107,8 @@ fun LoginScreen(
             Spacer(modifier = Modifier.height(8.dp))
             TextField(
                 value = email,
-                onValueChange = { email = it; hasError = false },
+                onValueChange = { email = it },
+                enabled = !loading,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp),
@@ -127,7 +128,8 @@ fun LoginScreen(
             Spacer(modifier = Modifier.height(8.dp))
             TextField(
                 value = password,
-                onValueChange = { password = it; hasError = false },
+                onValueChange = { password = it },
+                enabled = !loading,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp),
@@ -142,7 +144,10 @@ fun LoginScreen(
                     unfocusedIndicatorColor = Color.Transparent
                 ),
                 trailingIcon = {
-                    IconButton(onClick = { showPassword = !showPassword }) {
+                    IconButton(
+                        onClick = { showPassword = !showPassword },
+                        enabled = !loading
+                    ) {
                         Icon(
                             imageVector = if (showPassword) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
                             contentDescription = null,
@@ -153,7 +158,7 @@ fun LoginScreen(
             )
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = {}) {
+                TextButton(onClick = {}, enabled = !loading) {
                     Text(
                         tr(locale, TextKey.FORGOT_PASSWORD),
                         color = MaterialTheme.colorScheme.primary,
@@ -169,10 +174,9 @@ fun LoginScreen(
 
             Button(
                 onClick = {
-                    loading = true
-                    hasError = !onLogin(email, password)
-                    loading = false
+                    onLogin(email, password)
                 },
+                enabled = !loading,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(50.dp),
@@ -180,7 +184,11 @@ fun LoginScreen(
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
             ) {
                 if (loading) {
-                    CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.height(16.dp))
+                    CircularProgressIndicator(
+                        strokeWidth = 2.dp,
+                        color = Color.White,
+                        modifier = Modifier.height(16.dp)
+                    )
                 } else {
                     Text(tr(locale, TextKey.LOGIN_BUTTON), fontWeight = FontWeight.SemiBold)
                 }

@@ -23,8 +23,13 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Alignment
@@ -35,6 +40,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.widers.widerchat.core.TextKey
 import com.widers.widerchat.core.tr
+import com.widers.widerchat.data.local.SecureSessionStore
+import com.widers.widerchat.data.local.StoredSession
 import com.widers.widerchat.domain.model.AppLocale
 import com.widers.widerchat.domain.model.AppScreen
 import com.widers.widerchat.ui.screens.ChatScreen
@@ -49,18 +56,45 @@ import com.widers.widerchat.ui.theme.WiderChatTheme
 @Composable
 fun WidersApp(viewModel: AppViewModel = viewModel()) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val secureSessionStore = remember { SecureSessionStore(context) }
+    var attemptedAutoLogin by remember { mutableStateOf(false) }
     val dir = if (state.locale == AppLocale.AR) LayoutDirection.Rtl else LayoutDirection.Ltr
     val hideBottomNav = state.screen in setOf(AppScreen.CHAT, AppScreen.PRIVACY, AppScreen.TERMS, AppScreen.VERSION)
+
+    LaunchedEffect(state.isLoggedIn, state.isLoading) {
+        if (!attemptedAutoLogin && !state.isLoggedIn && !state.isLoading) {
+            attemptedAutoLogin = true
+            val saved = secureSessionStore.read()
+            if (saved != null) {
+                viewModel.restoreSession(token = saved.token, companyId = saved.companyId)
+            }
+        }
+    }
+
+    LaunchedEffect(state.isLoggedIn) {
+        if (state.isLoggedIn) {
+            viewModel.sessionSnapshot()?.let { (token, companyId) ->
+                secureSessionStore.save(StoredSession(token = token, companyId = companyId))
+            }
+        }
+    }
 
     WiderChatTheme(darkTheme = state.darkMode, dynamicColor = false) {
         CompositionLocalProvider(androidx.compose.ui.platform.LocalLayoutDirection provides dir) {
             if (!state.isLoggedIn || state.screen == AppScreen.LOGIN) {
                 LoginScreen(
                     locale = state.locale,
+                    loading = state.isLoading,
+                    hasError = state.loginError,
                     onToggleLocale = {
-                        viewModel.setLocale(if (state.locale == AppLocale.EN) AppLocale.AR else AppLocale.EN)
+                        if (!state.isLoading) {
+                            viewModel.setLocale(if (state.locale == AppLocale.EN) AppLocale.AR else AppLocale.EN)
+                        }
                     },
-                    onLogin = viewModel::login
+                    onLogin = { email, password ->
+                        viewModel.login(email, password)
+                    }
                 )
                 return@CompositionLocalProvider
             }
@@ -82,7 +116,15 @@ fun WidersApp(viewModel: AppViewModel = viewModel()) {
                         modifier = Modifier.padding(padding),
                         locale = state.locale,
                         conversations = state.conversations,
-                        onOpenChat = viewModel::openChat
+                        contacts = state.newConversationContacts,
+                        contactsLoading = state.contactsLoading,
+                        onOpenChat = viewModel::openChat,
+                        onSearchChats = viewModel::searchChats,
+                        onLoadContacts = viewModel::loadContactsForNewConversation,
+                        onSearchContacts = viewModel::searchContactsForNewConversation,
+                        onStartConversationForContact = viewModel::startConversationForContact,
+                        onStartNewConversation = viewModel::startNewConversation,
+                        actionStatus = state.actionStatus
                     )
 
                     AppScreen.CHAT -> ChatScreen(
@@ -94,20 +136,44 @@ fun WidersApp(viewModel: AppViewModel = viewModel()) {
                         messages = state.activeMessages,
                         onBack = viewModel::backToConversations,
                         onSend = viewModel::sendMessage,
+                        onSendAttachment = viewModel::sendAttachment,
+                        onSendVoice = viewModel::sendVoiceNote,
                         onAddNote = viewModel::addNote,
-                        onToggleStatus = viewModel::toggleConversationStatus
+                        onToggleStatus = viewModel::toggleConversationStatus,
+                        onAssignAgent = viewModel::assignCurrentChat,
+                        onUnassignAgent = viewModel::unassignCurrentChat,
+                        onMute = viewModel::muteCurrentChat,
+                        onMarkRead = viewModel::markCurrentChatRead,
+                        onAttachTag = viewModel::attachTagToCurrentChat,
+                        onDetachTag = viewModel::detachTagFromCurrentChat,
+                        onSendTemplate = viewModel::sendTemplateToCurrentChat,
+                        onSendFlow = viewModel::sendFlowToCurrentChat,
+                        onSyncCustomField = viewModel::syncCurrentContactCustomField,
+                        onDeleteChat = viewModel::deleteCurrentChat,
+                        isHistoryLoading = state.isChatLoading,
+                        actionStatus = state.actionStatus
                     )
 
                     AppScreen.SETTINGS -> SettingsScreen(
                         modifier = Modifier.padding(padding),
                         locale = state.locale,
                         darkMode = state.darkMode,
+                        profileName = state.profileName,
+                        profileEmail = state.profileEmail,
                         onLocaleChange = viewModel::setLocale,
                         onDarkModeChange = viewModel::setDarkMode,
                         onOpenPrivacy = { viewModel.setScreen(AppScreen.PRIVACY) },
                         onOpenTerms = { viewModel.setScreen(AppScreen.TERMS) },
                         onOpenVersion = { viewModel.setScreen(AppScreen.VERSION) },
-                        onLogout = viewModel::logout
+                        onLogout = {
+                            secureSessionStore.clear()
+                            viewModel.logout()
+                        },
+                        onSyncSupportData = viewModel::preloadSupportData,
+                        onCreateTag = viewModel::createOrUpdateTag,
+                        onCreateReply = viewModel::createOrUpdateReply,
+                        onAddContact = viewModel::addContact,
+                        actionStatus = state.actionStatus
                     )
 
                     AppScreen.PRIVACY -> PrivacyScreen(

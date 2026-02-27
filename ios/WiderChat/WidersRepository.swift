@@ -1,0 +1,321 @@
+import Foundation
+
+final class WidersRepository: ChatRepository {
+    private let api = WidersAPIClient()
+    private(set) var session: APISession?
+    private(set) var conversationsCache: [Conversation] = []
+    private var contactPhonesById: [String: String] = [:]
+    private var sessionUserName: String?
+    private var sessionUserEmail: String?
+
+    func login(email: String, password: String) async -> Bool {
+        do {
+            let response = try await api.login(email: email, password: password)
+            let companiesTop = response["companies"] as? [[String: Any]]
+            let companiesNested = (response["data"] as? [String: Any])?["companies"] as? [[String: Any]]
+            guard
+                let token = response.firstString(keys: ["token", "access_token", "api_token"])
+                    ?? (response["data"] as? [String: Any])?.firstString(keys: ["token", "access_token", "api_token"]),
+                let companyId = response.firstInt(keys: ["company_id"])
+                    ?? (response["data"] as? [String: Any])?.firstInt(keys: ["company_id", "id"])
+                    ?? companiesTop?.first?.firstInt(keys: ["company_id", "id"])
+                    ?? companiesNested?.first?.firstInt(keys: ["company_id", "id"])
+            else {
+                return false
+            }
+            session = APISession(token: token, companyId: companyId)
+            let data = response["data"] as? [String: Any]
+            let user = response["user"] as? [String: Any]
+                ?? data?["user"] as? [String: Any]
+            let merchant = user?["merchant"] as? [String: Any]
+                ?? data?["merchant"] as? [String: Any]
+            let fallbackName = email.split(separator: "@").first.map(String.init)?.capitalized ?? "Account"
+            sessionUserName = user?.firstString(keys: ["name", "full_name", "username"])
+                ?? merchant?.firstString(keys: ["name", "company_name"])
+                ?? fallbackName
+            sessionUserEmail = user?.firstString(keys: ["email", "user_email"])
+                ?? response.firstString(keys: ["email"])
+                ?? email.trimmingCharacters(in: .whitespacesAndNewlines)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    func getConversations() async -> [Conversation] {
+        guard let session else { return [] }
+        do {
+            let response = try await api.getChatsList(session: session)
+            let rows = response.firstArray(keys: ["conversations", "chats", "data", "rows", "result"])
+            let mapped: [Conversation] = rows.compactMap { item in
+                guard let id = item.firstString(keys: ["contact_id", "id", "conversation_id"]) else { return nil }
+                let statusRaw = (item["chats_status"] as? [String: Any])?.firstInt(keys: ["is_open"]) == 0 ? "closed" : (item.firstString(keys: ["status"]) ?? "open")
+                return Conversation(
+                    id: id,
+                    customerName: item.firstString(keys: ["name", "customer_name", "contact_name", "title"]) ?? "Customer",
+                    customerPhone: item.firstString(keys: ["phone", "contact_phone", "wa_id", "number"]) ?? "",
+                    lastMessage: sanitizeConversationPreview(item.firstString(keys: ["last_message", "last_value", "value", "text", "body"]) ?? ""),
+                    lastMessageTime: formatApiDateTime(item.firstString(keys: ["updated_at", "last_reply_at", "last_message_time", "created_at", "time"]) ?? ""),
+                    unreadCount: {
+                        let rawUnread = item.firstInt(keys: ["unread_messages", "unread_count", "unread"]) ?? 0
+                        let isReaded = (item["chats_status"] as? [String: Any])?.firstBool(keys: ["is_readed"]) ?? item.firstBool(keys: ["is_readed"])
+                        if isReaded == true { return 0 }
+                        if isReaded == false { return rawUnread > 0 ? rawUnread : 1 }
+                        return rawUnread
+                    }(),
+                    status: statusRaw == "closed" ? .closed : .open,
+                    isOnline: item.firstBool(keys: ["is_online", "online"]) ?? false
+                )
+            }
+            conversationsCache = mapped
+            return mapped
+        } catch {
+            return []
+        }
+    }
+
+    func getMessages(conversationId: String) async -> [ChatMessage] {
+        guard let session, let contactId = Int(conversationId) else { return [] }
+        do {
+            var rows = try await loadAllMessageRows(session: session, contactId: contactId)
+            if shouldReverseMessageOrder(rows) {
+                rows.reverse()
+            }
+            let remoteMessages = rows.enumerated().compactMap { index, item -> ChatMessage? in
+                let kind = item.firstString(keys: ["type", "message_type"]) ?? "text"
+                let messageTypeCode = item.firstInt(keys: ["message_type"]) ?? 1
+                let isNote = (item.firstInt(keys: ["is_note"]) ?? 0) == 1 || kind == "note"
+                let media = item.extractMediaPayload()
+                let content = item.extractDisplayContent()
+                if item.isSkippableEmptyOutgoing(content: content, media: media, messageTypeCode: messageTypeCode) {
+                    return nil
+                }
+                let isAgent = item.firstBool(keys: ["from_me", "is_agent", "agent"])
+                    ?? ((item.firstInt(keys: ["is_message_by_contact"]) ?? 1) == 0)
+                    ?? (item.firstString(keys: ["sender", "sender_type"]) == "agent")
+                return ChatMessage(
+                    id: item.firstString(keys: ["id", "message_id", "wamid"]) ?? "msg-\(index)",
+                    conversationId: conversationId,
+                    content: content,
+                    timestamp: formatApiDateTime(item.firstString(keys: ["created_at", "time", "timestamp"]) ?? ""),
+                    type: isNote ? .note : (media != nil || messageTypeCode != 1 ? .media : .text),
+                    sender: isAgent ? .agent : .customer,
+                    status: .read,
+                    noteAuthor: isNote ? "You" : nil,
+                    mediaUrl: media?.1,
+                    mediaKind: media?.0
+                )
+            }
+            return remoteMessages
+        } catch {
+            return []
+        }
+    }
+
+    private func loadAllMessageRows(session: APISession, contactId: Int) async throws -> [[String: Any]] {
+        var allRows: [[String: Any]] = []
+        var afterId = 0
+        var pageCount = 0
+        let maxPages = 60
+        let pageSize = 150
+
+        while pageCount < maxPages {
+            let response = try await api.getChatMessages(session: session, contactId: contactId, afterId: afterId)
+            let page = response.firstArray(keys: ["messages", "data", "rows", "result"])
+            if page.isEmpty { break }
+            allRows.append(contentsOf: page)
+
+            let pageMaxId = page.compactMap { $0.firstInt(keys: ["id", "message_id"]) }.max() ?? afterId
+            if pageMaxId <= afterId { break }
+            afterId = pageMaxId
+            pageCount += 1
+            if page.count < pageSize { break }
+        }
+
+        return allRows
+    }
+
+    func sendMessage(conversationId: String, text: String) async -> Bool {
+        guard let session else { return false }
+        let phone = conversationsCache.first(where: { $0.id == conversationId })?.customerPhone
+            ?? contactPhonesById[conversationId]
+        guard let phone, !phone.isEmpty else { return false }
+        do {
+            _ = try await api.sendMessageMedia(
+                session: session,
+                phone: phone,
+                text: text,
+                fileName: nil,
+                fileData: nil
+            )
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    func sendMedia(conversationId: String, fileName: String, fileData: Data, text: String? = nil) async -> Bool {
+        guard let session else { return false }
+        let phone = conversationsCache.first(where: { $0.id == conversationId })?.customerPhone
+            ?? contactPhonesById[conversationId]
+        guard let phone, !phone.isEmpty else { return false }
+        do {
+            _ = try await api.sendMessageMedia(
+                session: session,
+                phone: phone,
+                text: text,
+                fileName: fileName,
+                fileData: fileData
+            )
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    func addNote(conversationId: String, note: String) async -> Bool {
+        guard let session, let contactId = Int(conversationId) else { return false }
+        do {
+            _ = try await api.addNote(session: session, contactId: contactId, note: note)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    func updateConversationStatus(conversationId: String, open: Bool) async -> Bool {
+        guard let session, let contactId = Int(conversationId) else { return false }
+        do {
+            _ = try await api.updateOpenStatus(session: session, contactId: contactId, status: open)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    // Full endpoint coverage from Postman collection.
+    func getContactsList() async -> [String: Any]? {
+        guard let session else { return nil }
+        guard let payload = try? await api.getContactsList(session: session) else { return nil }
+        let rows = payload.firstArray(keys: ["contacts", "data", "rows", "result"])
+        var map: [String: String] = [:]
+        for item in rows {
+            guard let id = item.firstString(keys: ["id", "contact_id"]),
+                  let phone = item.firstString(keys: ["phone", "wa_id", "number"]),
+                  !phone.isEmpty
+            else { continue }
+            map[id] = phone
+        }
+        contactPhonesById = map
+        return payload
+    }
+    func getTemplatesList() async -> [String: Any]? { guard let session else { return nil }; return try? await api.getTemplatesList(session: session) }
+    func getTagsList() async -> [String: Any]? { guard let session else { return nil }; return try? await api.getTagsList(session: session) }
+    func getRepliesList() async -> [String: Any]? { guard let session else { return nil }; return try? await api.getRepliesList(session: session) }
+    func getFlowsList() async -> [String: Any]? { guard let session else { return nil }; return try? await api.getFlowsList(session: session) }
+    func getAgentsList() async -> [String: Any]? { guard let session else { return nil }; return try? await api.getAgentsList(session: session) }
+    func getContactCustomFields(contactId: Int) async -> [String: Any]? { guard let session else { return nil }; return try? await api.getContactCustomFields(session: session, contactId: contactId) }
+    func syncContactCustomFields(contactId: Int, custom: [String: Any]) async -> [String: Any]? { guard let session else { return nil }; return try? await api.syncContactCustomFields(session: session, contactId: contactId, custom: custom) }
+    func attachTag(contactId: Int, tagId: Int) async -> [String: Any]? { guard let session else { return nil }; return try? await api.attachTagToChat(session: session, contactId: contactId, tagId: tagId) }
+    func detachTag(contactId: Int, tagId: Int) async -> [String: Any]? { guard let session else { return nil }; return try? await api.detachTagFromChat(session: session, contactId: contactId, tagId: tagId) }
+    func searchChats(keyword: String, page: Int = 1, limit: Int = 50) async -> [String: Any]? { guard let session else { return nil }; return try? await api.searchChats(session: session, keyword: keyword, page: page, limit: limit) }
+    func sendTemplateMessage(contactId: Int, templateId: Int) async -> [String: Any]? { guard let session else { return nil }; return try? await api.sendTemplateMessage(session: session, contactId: contactId, templateId: templateId) }
+    func sendFlow(contactId: Int, flowId: Int) async -> [String: Any]? { guard let session else { return nil }; return try? await api.sendFlow(session: session, contactId: contactId, flowId: flowId) }
+    func assignAgent(contactId: Int, agent: Int) async -> [String: Any]? { guard let session else { return nil }; return try? await api.assignAgent(session: session, contactId: contactId, agent: agent) }
+    func unassignAgent(contactId: Int) async -> [String: Any]? { guard let session else { return nil }; return try? await api.unassignAgent(session: session, contactId: contactId) }
+    func updateMute(contactId: Int, status: Bool) async -> [String: Any]? { guard let session else { return nil }; return try? await api.updateMuteStatus(session: session, contactId: contactId, status: status) }
+    func updateRead(contactId: Int, status: Bool) async -> [String: Any]? { guard let session else { return nil }; return try? await api.updateReadStatus(session: session, contactId: contactId, status: status) }
+    func deleteChat(contactId: Int) async -> [String: Any]? { guard let session else { return nil }; return try? await api.deleteChat(session: session, contactId: contactId) }
+    func addContact(name: String, phone: String, email: String?) async -> [String: Any]? { guard let session else { return nil }; return try? await api.addContact(session: session, name: name, phone: phone, email: email) }
+    func searchContacts(query: String) async -> [String: Any]? { guard let session else { return nil }; return try? await api.searchContacts(session: session, query: query) }
+    func updateContact(contactId: Int, name: String, phone: String, email: String?) async -> [String: Any]? { guard let session else { return nil }; return try? await api.updateContact(session: session, contactId: contactId, name: name, phone: phone, email: email) }
+    func createOrUpdateTag(name: String, color: String, tagId: Int?) async -> [String: Any]? { guard let session else { return nil }; return try? await api.createOrUpdateTag(session: session, name: name, color: color, tagId: tagId) }
+    func createOrUpdateReply(name: String, text: String, replyId: Int?) async -> [String: Any]? { guard let session else { return nil }; return try? await api.createOrUpdateReply(session: session, name: name, text: text, replyId: replyId) }
+
+    func currentSessionSnapshot() -> APISession? {
+        session
+    }
+
+    func currentUserSnapshot() -> (name: String?, email: String?) {
+        (sessionUserName, sessionUserEmail)
+    }
+
+    func restoreSession(token: String, companyId: Int) {
+        guard !token.isEmpty, companyId > 0 else { return }
+        session = APISession(token: token, companyId: companyId)
+    }
+
+    func clearSession() {
+        session = nil
+    }
+
+}
+
+private func shouldReverseMessageOrder(_ rows: [[String: Any]]) -> Bool {
+    guard rows.count >= 2 else { return false }
+    let first = rows[0]
+    let last = rows[rows.count - 1]
+
+    if let firstId = first.firstInt(keys: ["id", "message_id"]),
+       let lastId = last.firstInt(keys: ["id", "message_id"]) {
+        return firstId > lastId
+    }
+
+    if let firstTs = first.firstString(keys: ["created_at", "timestamp", "time"]),
+       let lastTs = last.firstString(keys: ["created_at", "timestamp", "time"]) {
+        return firstTs > lastTs
+    }
+
+    return false
+}
+
+private func sanitizeConversationPreview(_ raw: String) -> String {
+    let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    if text.isEmpty { return raw }
+    let lower = text.lowercased()
+    let looksLikeURL = lower.hasPrefix("http://") || lower.hasPrefix("https://")
+    let isMediaUpload = lower.contains("/uploads/media/")
+    if !looksLikeURL && !isMediaUpload { return raw }
+
+    if lower.hasSuffix(".jpg") || lower.hasSuffix(".jpeg") || lower.hasSuffix(".png") || lower.hasSuffix(".gif") || lower.hasSuffix(".webp") {
+        return "Photo"
+    }
+    if lower.hasSuffix(".mp4") || lower.hasSuffix(".mov") || lower.hasSuffix(".mkv") || lower.hasSuffix(".avi") || lower.hasSuffix(".webm") {
+        return "Video"
+    }
+    if lower.hasSuffix(".mp3") || lower.hasSuffix(".m4a") || lower.hasSuffix(".aac") || lower.hasSuffix(".wav") || lower.hasSuffix(".ogg") || lower.hasSuffix(".opus") {
+        return "Voice message"
+    }
+    if lower.hasSuffix(".pdf") || lower.hasSuffix(".doc") || lower.hasSuffix(".docx") || lower.hasSuffix(".xls") || lower.hasSuffix(".xlsx") || lower.hasSuffix(".ppt") || lower.hasSuffix(".pptx") || lower.hasSuffix(".txt") || lower.hasSuffix(".zip") || lower.hasSuffix(".rar") {
+        return "Document"
+    }
+    return "Media"
+}
+
+private func formatApiDateTime(_ value: String) -> String {
+    let raw = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    if raw.isEmpty { return value }
+
+    let output = DateFormatter()
+    output.dateFormat = "h:mm a"
+    output.locale = Locale(identifier: "en_US_POSIX")
+
+    let inputPatterns = [
+        "yyyy-MM-dd'T'HH:mm:ss.SSSSSS'Z'",
+        "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+        "yyyy-MM-dd HH:mm:ss",
+        "yyyy-MM-dd'T'HH:mm:ss'Z'"
+    ]
+
+    for pattern in inputPatterns {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = pattern
+        if let date = formatter.date(from: raw) {
+            return output.string(from: date)
+        }
+    }
+    return value
+}
+

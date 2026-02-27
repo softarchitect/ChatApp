@@ -58,5 +58,7 @@ data class ChatMessage(
     val type: MessageType,
     val sender: MessageSender,
     val status: MessageDeliveryStatus,
-    val noteAuthor: String? = null
+    val noteAuthor: String? = null,
+    val mediaUrl: String? = null,
+    val mediaKind: String? = null
 )

@@ -51,7 +51,17 @@ enum class TextKey {
     APPEARANCE,
     NOTIFICATION_SETTINGS,
     ABOUT,
-    TODAY
+    TODAY,
+    NEW_CONVERSATION_TITLE,
+    NEW_CONVERSATION_MESSAGE,
+    NAME_LABEL,
+    PHONE_LABEL,
+    CREATE,
+    CAMERA,
+    GALLERY,
+    DOCUMENT,
+    AUDIO,
+    STOP_SEND_VOICE
 }
 
 fun tr(locale: AppLocale, key: TextKey): String {
@@ -106,5 +116,15 @@ fun tr(locale: AppLocale, key: TextKey): String {
         TextKey.NOTIFICATION_SETTINGS -> if (isAr) "إعدادات الإشعارات" else "Notification Settings"
         TextKey.ABOUT -> if (isAr) "حول" else "About"
         TextKey.TODAY -> if (isAr) "اليوم" else "Today"
+        TextKey.NEW_CONVERSATION_TITLE -> if (isAr) "محادثة جديدة" else "New conversation"
+        TextKey.NEW_CONVERSATION_MESSAGE -> if (isAr) "أنشئ جهة اتصال وافتح محادثتها." else "Create a contact and open its chat."
+        TextKey.NAME_LABEL -> if (isAr) "الاسم" else "Name"
+        TextKey.PHONE_LABEL -> if (isAr) "الهاتف" else "Phone"
+        TextKey.CREATE -> if (isAr) "إنشاء" else "Create"
+        TextKey.CAMERA -> if (isAr) "الكاميرا" else "Camera"
+        TextKey.GALLERY -> if (isAr) "المعرض" else "Gallery"
+        TextKey.DOCUMENT -> if (isAr) "مستند" else "Document"
+        TextKey.AUDIO -> if (isAr) "صوت" else "Audio"
+        TextKey.STOP_SEND_VOICE -> if (isAr) "إيقاف وإرسال الصوت" else "Stop & send voice"
     }
 }

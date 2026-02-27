@@ -5,8 +5,10 @@ import com.widers.widerchat.domain.model.Conversation
 import com.widers.widerchat.domain.model.ConversationStatus
 
 interface ChatRepository {
-    fun getConversations(): List<Conversation>
-    fun getMessages(conversationId: String): List<ChatMessage>
-    fun appendMessage(message: ChatMessage)
-    fun updateConversationStatus(conversationId: String, status: ConversationStatus)
+    suspend fun login(email: String, password: String): Boolean
+    suspend fun getConversations(): List<Conversation>
+    suspend fun getMessages(conversationId: String): List<ChatMessage>
+    suspend fun appendMessage(message: ChatMessage)
+    suspend fun updateConversationStatus(conversationId: String, status: ConversationStatus)
+    suspend fun addNote(conversationId: String, note: String)
 }
