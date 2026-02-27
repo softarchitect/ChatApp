@@ -216,7 +216,7 @@ private struct VideoMessageThumbnail: View {
     }
 }
 
-private struct VideoPlayerSheet: View {
+struct VideoPlayerSheet: View {
     let videoURL: URL
     @Environment(\.dismiss) private var dismiss
     @State private var player: AVPlayer?
@@ -378,7 +378,7 @@ private func formatVideoTime(_ seconds: Double) -> String {
     return "\(mins):\(String(format: "%02d", secs))"
 }
 
-private struct InlineAudioMessageView: View {
+struct InlineAudioMessageView: View {
     let audioURL: URL
     let darkMode: Bool
 
@@ -493,7 +493,7 @@ private struct InlineAudioMessageView: View {
     }
 }
 
-private struct ZoomableImageViewer: View {
+struct ZoomableImageViewer: View {
     let imageURL: URL
     @Environment(\.dismiss) private var dismiss
 
@@ -586,7 +586,7 @@ private struct ZoomableImageViewer: View {
     }
 }
 
-private struct DocumentPreviewSheet: View {
+struct DocumentPreviewSheet: View {
     let documentURL: URL
 
     var body: some View {

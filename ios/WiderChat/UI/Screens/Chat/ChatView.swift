@@ -548,7 +548,14 @@ struct ChatView: View {
 
     private func startVoiceRecording() {
         let session = AVAudioSession.sharedInstance()
-        session.requestRecordPermission { granted in
+        let requestPermission: (@escaping (Bool) -> Void) -> Void = { completion in
+            if #available(iOS 17.0, *) {
+                AVAudioApplication.requestRecordPermission(completionHandler: completion)
+            } else {
+                session.requestRecordPermission(completion)
+            }
+        }
+        requestPermission { granted in
             guard granted else {
                 DispatchQueue.main.async {
                     vm.actionStatus = "Failed: microphone permission denied"
@@ -841,7 +848,15 @@ private struct MediaLinksDocsItem: Identifiable {
     let url: String
     let category: MediaLinksDocsCategory
     let previewKind: String
-    let isAvailable: Bool = true
+    let isAvailable: Bool
+
+    init(type: String, url: String, category: MediaLinksDocsCategory, previewKind: String, isAvailable: Bool = true) {
+        self.type = type
+        self.url = url
+        self.category = category
+        self.previewKind = previewKind
+        self.isAvailable = isAvailable
+    }
 }
 
 private enum MediaLinksDocsCategory: String {
