@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.Image
 import androidx.compose.material.icons.Icons
@@ -181,13 +182,19 @@ fun LoginScreen(
                     .fillMaxWidth()
                     .height(50.dp),
                 shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    disabledContainerColor = MaterialTheme.colorScheme.primary,
+                    disabledContentColor = MaterialTheme.colorScheme.onPrimary
+                )
             ) {
                 if (loading) {
                     CircularProgressIndicator(
-                        strokeWidth = 2.dp,
-                        color = Color.White,
-                        modifier = Modifier.height(16.dp)
+                        strokeWidth = 2.25.dp,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        trackColor = Color.Transparent,
+                        modifier = Modifier.size(20.dp)
                     )
                 } else {
                     Text(tr(locale, TextKey.LOGIN_BUTTON), fontWeight = FontWeight.SemiBold)
@@ -196,8 +203,8 @@ fun LoginScreen(
         }
 
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-            Text("Powered by Widers", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("Meta Approved Partner", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(tr(locale, TextKey.POWERED_BY_WIDERS), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(tr(locale, TextKey.META_APPROVED_PARTNER), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

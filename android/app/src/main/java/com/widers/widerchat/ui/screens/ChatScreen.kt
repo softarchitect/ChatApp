@@ -102,11 +102,13 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.core.content.ContextCompat
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -461,77 +463,77 @@ fun ChatScreen(
                         }
                     )
                     DropdownMenuItem(
-                        text = { Text("Assign agent") },
+                        text = { Text(tr(locale, TextKey.ASSIGN_AGENT)) },
                         onClick = {
                             showAssignDialog = true
                             menuOpen = false
                         }
                     )
                     DropdownMenuItem(
-                        text = { Text("Unassign agent") },
+                        text = { Text(tr(locale, TextKey.UNASSIGN_AGENT)) },
                         onClick = {
                             onUnassignAgent()
                             menuOpen = false
                         }
                     )
                     DropdownMenuItem(
-                        text = { Text("Mute conversation") },
+                        text = { Text(tr(locale, TextKey.MUTE_CONVERSATION)) },
                         onClick = {
                             onMute(true)
                             menuOpen = false
                         }
                     )
                     DropdownMenuItem(
-                        text = { Text("Unmute conversation") },
+                        text = { Text(tr(locale, TextKey.UNMUTE_CONVERSATION)) },
                         onClick = {
                             onMute(false)
                             menuOpen = false
                         }
                     )
                     DropdownMenuItem(
-                        text = { Text("Mark as read") },
+                        text = { Text(tr(locale, TextKey.MARK_AS_READ)) },
                         onClick = {
                             onMarkRead(true)
                             menuOpen = false
                         }
                     )
                     DropdownMenuItem(
-                        text = { Text("Mark as unread") },
+                        text = { Text(tr(locale, TextKey.MARK_AS_UNREAD)) },
                         onClick = {
                             onMarkRead(false)
                             menuOpen = false
                         }
                     )
                     DropdownMenuItem(
-                        text = { Text("Attach/Detach tag") },
+                        text = { Text(tr(locale, TextKey.ATTACH_DETACH_TAG)) },
                         onClick = {
                             showTagDialog = true
                             menuOpen = false
                         }
                     )
                     DropdownMenuItem(
-                        text = { Text("Send template") },
+                        text = { Text(tr(locale, TextKey.SEND_TEMPLATE)) },
                         onClick = {
                             showTemplateDialog = true
                             menuOpen = false
                         }
                     )
                     DropdownMenuItem(
-                        text = { Text("Send flow") },
+                        text = { Text(tr(locale, TextKey.SEND_FLOW)) },
                         onClick = {
                             showFlowDialog = true
                             menuOpen = false
                         }
                     )
                     DropdownMenuItem(
-                        text = { Text("Sync custom field") },
+                        text = { Text(tr(locale, TextKey.SYNC_CUSTOM_FIELD)) },
                         onClick = {
                             showCustomDialog = true
                             menuOpen = false
                         }
                     )
                     DropdownMenuItem(
-                        text = { Text("Delete chat", color = Color(0xFFEF4444)) },
+                        text = { Text(tr(locale, TextKey.DELETE_CHAT), color = Color(0xFFEF4444)) },
                         onClick = {
                             showDeleteDialog = true
                             menuOpen = false
@@ -939,17 +941,17 @@ fun ChatScreen(
     if (showAssignDialog) {
         AlertDialog(
             onDismissRequest = { showAssignDialog = false },
-            title = { Text("Assign Agent") },
+            title = { Text(tr(locale, TextKey.ASSIGN_AGENT_TITLE)) },
             text = {
-                OutlinedTextField(value = agentInput, onValueChange = { agentInput = it }, label = { Text("Agent ID") })
+                OutlinedTextField(value = agentInput, onValueChange = { agentInput = it }, label = { Text(tr(locale, TextKey.AGENT_ID)) })
             },
-            dismissButton = { TextButton(onClick = { showAssignDialog = false }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { showAssignDialog = false }) { Text(tr(locale, TextKey.CANCEL)) } },
             confirmButton = {
                 TextButton(onClick = {
                     agentInput.toLongOrNull()?.let(onAssignAgent)
                     showAssignDialog = false
                     agentInput = ""
-                }) { Text("Assign") }
+                }) { Text(tr(locale, TextKey.ASSIGN_AGENT)) }
             }
         )
     }
@@ -957,21 +959,21 @@ fun ChatScreen(
     if (showTagDialog) {
         AlertDialog(
             onDismissRequest = { showTagDialog = false },
-            title = { Text("Attach / Detach Tag") },
-            text = { OutlinedTextField(value = tagInput, onValueChange = { tagInput = it }, label = { Text("Tag ID") }) },
-            dismissButton = { TextButton(onClick = { showTagDialog = false }) { Text("Cancel") } },
+            title = { Text(tr(locale, TextKey.ATTACH_DETACH_TAG_TITLE)) },
+            text = { OutlinedTextField(value = tagInput, onValueChange = { tagInput = it }, label = { Text(tr(locale, TextKey.TAG_ID)) }) },
+            dismissButton = { TextButton(onClick = { showTagDialog = false }) { Text(tr(locale, TextKey.CANCEL)) } },
             confirmButton = {
                 Row {
                     TextButton(onClick = {
                         tagInput.toLongOrNull()?.let(onAttachTag)
                         showTagDialog = false
                         tagInput = ""
-                    }) { Text("Attach") }
+                    }) { Text(tr(locale, TextKey.ATTACH)) }
                     TextButton(onClick = {
                         tagInput.toLongOrNull()?.let(onDetachTag)
                         showTagDialog = false
                         tagInput = ""
-                    }) { Text("Detach") }
+                    }) { Text(tr(locale, TextKey.DETACH)) }
                 }
             }
         )
@@ -980,15 +982,15 @@ fun ChatScreen(
     if (showTemplateDialog) {
         AlertDialog(
             onDismissRequest = { showTemplateDialog = false },
-            title = { Text("Send Template") },
-            text = { OutlinedTextField(value = templateInput, onValueChange = { templateInput = it }, label = { Text("Template ID") }) },
-            dismissButton = { TextButton(onClick = { showTemplateDialog = false }) { Text("Cancel") } },
+            title = { Text(tr(locale, TextKey.SEND_TEMPLATE_TITLE)) },
+            text = { OutlinedTextField(value = templateInput, onValueChange = { templateInput = it }, label = { Text(tr(locale, TextKey.TEMPLATE_ID)) }) },
+            dismissButton = { TextButton(onClick = { showTemplateDialog = false }) { Text(tr(locale, TextKey.CANCEL)) } },
             confirmButton = {
                 TextButton(onClick = {
                     templateInput.toLongOrNull()?.let(onSendTemplate)
                     showTemplateDialog = false
                     templateInput = ""
-                }) { Text("Send") }
+                }) { Text(tr(locale, TextKey.SEND)) }
             }
         )
     }
@@ -996,15 +998,15 @@ fun ChatScreen(
     if (showFlowDialog) {
         AlertDialog(
             onDismissRequest = { showFlowDialog = false },
-            title = { Text("Send Flow") },
-            text = { OutlinedTextField(value = flowInput, onValueChange = { flowInput = it }, label = { Text("Flow ID") }) },
-            dismissButton = { TextButton(onClick = { showFlowDialog = false }) { Text("Cancel") } },
+            title = { Text(tr(locale, TextKey.SEND_FLOW_TITLE)) },
+            text = { OutlinedTextField(value = flowInput, onValueChange = { flowInput = it }, label = { Text(tr(locale, TextKey.FLOW_ID)) }) },
+            dismissButton = { TextButton(onClick = { showFlowDialog = false }) { Text(tr(locale, TextKey.CANCEL)) } },
             confirmButton = {
                 TextButton(onClick = {
                     flowInput.toLongOrNull()?.let(onSendFlow)
                     showFlowDialog = false
                     flowInput = ""
-                }) { Text("Send") }
+                }) { Text(tr(locale, TextKey.SEND)) }
             }
         )
     }
@@ -1012,22 +1014,22 @@ fun ChatScreen(
     if (showCustomDialog) {
         AlertDialog(
             onDismissRequest = { showCustomDialog = false },
-            title = { Text("Sync Custom Field") },
+            title = { Text(tr(locale, TextKey.SYNC_CUSTOM_FIELD_TITLE)) },
             text = {
                 Column {
-                    OutlinedTextField(value = customFieldId, onValueChange = { customFieldId = it }, label = { Text("Field ID") })
+                    OutlinedTextField(value = customFieldId, onValueChange = { customFieldId = it }, label = { Text(tr(locale, TextKey.FIELD_ID)) })
                     Spacer(Modifier.size(8.dp))
-                    OutlinedTextField(value = customFieldValue, onValueChange = { customFieldValue = it }, label = { Text("Field Value") })
+                    OutlinedTextField(value = customFieldValue, onValueChange = { customFieldValue = it }, label = { Text(tr(locale, TextKey.FIELD_VALUE)) })
                 }
             },
-            dismissButton = { TextButton(onClick = { showCustomDialog = false }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { showCustomDialog = false }) { Text(tr(locale, TextKey.CANCEL)) } },
             confirmButton = {
                 TextButton(onClick = {
                     onSyncCustomField(customFieldId, customFieldValue)
                     showCustomDialog = false
                     customFieldId = ""
                     customFieldValue = ""
-                }) { Text("Sync") }
+                }) { Text(tr(locale, TextKey.SYNC)) }
             }
         )
     }
@@ -1035,14 +1037,14 @@ fun ChatScreen(
     if (showDeleteDialog) {
         AlertDialog(
             onDismissRequest = { showDeleteDialog = false },
-            title = { Text("Delete chat?") },
-            text = { Text("This calls the delete chat endpoint for this contact.") },
-            dismissButton = { TextButton(onClick = { showDeleteDialog = false }) { Text("Cancel") } },
+            title = { Text(tr(locale, TextKey.DELETE_CHAT_QUESTION)) },
+            text = { Text(tr(locale, TextKey.DELETE_CHAT_ENDPOINT_HINT)) },
+            dismissButton = { TextButton(onClick = { showDeleteDialog = false }) { Text(tr(locale, TextKey.CANCEL)) } },
             confirmButton = {
                 TextButton(onClick = {
                     onDeleteChat()
                     showDeleteDialog = false
-                }) { Text("Delete", color = Color(0xFFEF4444)) }
+                }) { Text(tr(locale, TextKey.DELETE), color = Color(0xFFEF4444)) }
             }
         )
     }
@@ -1050,7 +1052,7 @@ fun ChatScreen(
     if (showContactInfoDialog) {
         AlertDialog(
             onDismissRequest = { showContactInfoDialog = false },
-            title = { Text("Contact info") },
+            title = { Text(tr(locale, TextKey.CONTACT_INFO)) },
             text = {
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1090,7 +1092,7 @@ fun ChatScreen(
                     )
                     Spacer(Modifier.size(6.dp))
                     Text(
-                        "Media, links and docs · $mediaLinksDocsCount",
+                        "${tr(locale, TextKey.MEDIA_LINKS_DOCS)} · $mediaLinksDocsCount",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.clickable {
@@ -1104,10 +1106,10 @@ fun ChatScreen(
                 Row {
                     TextButton(onClick = {
                         onMute(true)
-                    }) { Text("Mute") }
+                    }) { Text(tr(locale, TextKey.MUTE)) }
                     TextButton(onClick = {
                         onMute(false)
-                    }) { Text("Unmute") }
+                    }) { Text(tr(locale, TextKey.UNMUTE)) }
                 }
             },
             confirmButton = {
@@ -1115,13 +1117,13 @@ fun ChatScreen(
                     TextButton(onClick = {
                         onToggleStatus()
                     }) {
-                        Text(if (conversation.status == ConversationStatus.OPEN) "Close chat" else "Reopen chat")
+                        Text(if (conversation.status == ConversationStatus.OPEN) tr(locale, TextKey.CLOSE_CONVERSATION) else tr(locale, TextKey.REOPEN_CONVERSATION))
                     }
                     TextButton(onClick = {
                         showContactInfoDialog = false
                         showDeleteDialog = true
                     }) {
-                        Text("Delete", color = Color(0xFFEF4444))
+                        Text(tr(locale, TextKey.DELETE), color = Color(0xFFEF4444))
                     }
                 }
             }
@@ -1132,9 +1134,10 @@ fun ChatScreen(
         Dialog(onDismissRequest = { showMediaLinksDocsDialog = false }) {
             MediaLinksDocsBrowserDialog(
                 items = mediaLinksDocsItems,
+                locale = locale,
                 onOpenItem = { item ->
                     if (!item.isAvailable || item.url.isBlank()) {
-                        Toast.makeText(context, "Audio file URL is unavailable", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, tr(locale, TextKey.NO_URL_FROM_BACKEND), Toast.LENGTH_SHORT).show()
                     } else {
                         when (item.previewKind) {
                             "image" -> browserImageUrl = item.url
@@ -1147,19 +1150,19 @@ fun ChatScreen(
                 },
                 onShareItem = { item ->
                     if (!item.isAvailable || item.url.isBlank()) {
-                        Toast.makeText(context, "Cannot share unavailable item", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, tr(locale, TextKey.CANNOT_SHARE_UNAVAILABLE), Toast.LENGTH_SHORT).show()
                     } else {
                         shareMediaItem(context, item.url)
                     }
                 },
                 onDownloadItem = { item ->
                     if (!item.isAvailable || item.url.isBlank()) {
-                        Toast.makeText(context, "Cannot download unavailable item", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, tr(locale, TextKey.CANNOT_DOWNLOAD_UNAVAILABLE), Toast.LENGTH_SHORT).show()
                     } else {
                         val ok = downloadMediaItem(context, item.url)
                         Toast.makeText(
                             context,
-                            if (ok) "Downloading..." else "Unable to start download",
+                            if (ok) tr(locale, TextKey.DOWNLOADING) else tr(locale, TextKey.UNABLE_TO_START_DOWNLOAD),
                             Toast.LENGTH_SHORT
                         ).show()
                     }
@@ -1197,9 +1200,9 @@ fun ChatScreen(
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Audio", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text(tr(locale, TextKey.AUDIO), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                         Spacer(Modifier.weight(1f))
-                        TextButton(onClick = { browserAudioUrl = null }) { Text("Close") }
+                        TextButton(onClick = { browserAudioUrl = null }) { Text(tr(locale, TextKey.CLOSE)) }
                     }
                     InlineAudioPlayer(
                         mediaUrl = browserAudioUrl,
@@ -1215,6 +1218,7 @@ fun ChatScreen(
 @Composable
 private fun MediaLinksDocsBrowserDialog(
     items: List<ContactMediaItem>,
+    locale: AppLocale,
     onOpenItem: (ContactMediaItem) -> Unit,
     onShareItem: (ContactMediaItem) -> Unit,
     onDownloadItem: (ContactMediaItem) -> Unit,
@@ -1234,24 +1238,24 @@ private fun MediaLinksDocsBrowserDialog(
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Media, links and docs", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text(tr(locale, TextKey.MEDIA_LINKS_DOCS_TITLE), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.weight(1f))
-                TextButton(onClick = onClose) { Text("Close") }
+                TextButton(onClick = onClose) { Text(tr(locale, TextKey.CLOSE)) }
             }
             Spacer(Modifier.size(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ContactTabChip(
-                    text = "Media ($mediaCount)",
+                    text = "${tr(locale, TextKey.MEDIA_TAB)} ($mediaCount)",
                     selected = selectedTab == ContactItemCategory.MEDIA,
                     onClick = { selectedTab = ContactItemCategory.MEDIA }
                 )
                 ContactTabChip(
-                    text = "Docs ($docsCount)",
+                    text = "${tr(locale, TextKey.DOCS_TAB)} ($docsCount)",
                     selected = selectedTab == ContactItemCategory.DOCS,
                     onClick = { selectedTab = ContactItemCategory.DOCS }
                 )
                 ContactTabChip(
-                    text = "Links ($linksCount)",
+                    text = "${tr(locale, TextKey.LINKS_TAB)} ($linksCount)",
                     selected = selectedTab == ContactItemCategory.LINKS,
                     onClick = { selectedTab = ContactItemCategory.LINKS }
                 )
@@ -1259,7 +1263,7 @@ private fun MediaLinksDocsBrowserDialog(
             Spacer(Modifier.size(10.dp))
             if (filteredItems.isEmpty()) {
                 Text(
-                    "No items in this tab.",
+                    tr(locale, TextKey.NO_ITEMS_IN_TAB),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(vertical = 8.dp)
@@ -1269,6 +1273,7 @@ private fun MediaLinksDocsBrowserDialog(
                     items(filteredItems) { item ->
                         ContactMediaListRow(
                             item = item,
+                            locale = locale,
                             onOpen = onOpenItem,
                             onShare = onShareItem,
                             onDownload = onDownloadItem
@@ -1301,13 +1306,14 @@ private fun ContactTabChip(
 @Composable
 private fun ContactMediaListRow(
     item: ContactMediaItem,
+    locale: AppLocale,
     onOpen: (ContactMediaItem) -> Unit,
     onShare: (ContactMediaItem) -> Unit,
     onDownload: (ContactMediaItem) -> Unit
 ) {
     val title = item.url.substringAfterLast('/').substringBefore('?').trim()
         .takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) }
-        ?: if (item.isAvailable) "${item.type} file" else "Unavailable file"
+        ?: if (item.isAvailable) "${item.type} file" else "${tr(locale, TextKey.UNAVAILABLE)} file"
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1427,6 +1433,7 @@ private data class ContactMediaItem(
  
 @Composable
 private fun MessageBubble(msg: ChatMessage, darkMode: Boolean) {
+    val locale = if (LocalLayoutDirection.current == LayoutDirection.Rtl) AppLocale.AR else AppLocale.EN
     val uriHandler = LocalUriHandler.current
     var fullImageUrl by remember(msg.id) { mutableStateOf<String?>(null) }
     var previewDocumentUrl by remember(msg.id) { mutableStateOf<String?>(null) }
@@ -1449,7 +1456,7 @@ private fun MessageBubble(msg: ChatMessage, darkMode: Boolean) {
                     val noteTitle = if (darkMode) Color(0xFFFCD34D) else Color(0xFFB45309)
                     val noteBody = if (darkMode) Color(0xFFFFF7ED) else Color(0xFF78350F)
                     val noteMeta = if (darkMode) Color(0xFFF59E0B) else Color(0xFFB45309)
-                    Text("Note by ${msg.noteAuthor ?: "You"}", fontWeight = FontWeight.Bold, color = noteTitle)
+                    Text("${tr(locale, TextKey.NOTE_BY)} ${msg.noteAuthor ?: tr(locale, TextKey.YOU_LABEL)}", fontWeight = FontWeight.Bold, color = noteTitle)
                     Text(msg.content, color = noteBody)
                     Text(msg.timestamp, style = MaterialTheme.typography.labelSmall, color = noteMeta)
                 }
@@ -1570,13 +1577,14 @@ private fun MediaMessageCard(
     darkMode: Boolean,
     onOpen: (String) -> Unit
 ) {
+    val locale = if (LocalLayoutDirection.current == LayoutDirection.Rtl) AppLocale.AR else AppLocale.EN
     val title = when (mediaKind.lowercase()) {
-        "image" -> "Image"
-        "audio" -> "Audio"
-        "video" -> "Video"
-        "document" -> "Document"
-        "location" -> "Location"
-        else -> "Media"
+        "image" -> tr(locale, TextKey.PHOTO)
+        "audio" -> tr(locale, TextKey.AUDIO)
+        "video" -> tr(locale, TextKey.VIDEO)
+        "document" -> tr(locale, TextKey.DOCUMENT)
+        "location" -> tr(locale, TextKey.LOCATION)
+        else -> tr(locale, TextKey.MEDIA_MESSAGE)
     }
     val cardBg = if (darkMode) Color(0xFF16232C) else Color(0xFFEAF6FF)
     val labelColor = if (darkMode) Color(0xFF9FD8FF) else Color(0xFF1D4ED8)
@@ -1640,7 +1648,7 @@ private fun MediaMessageCard(
                             Text(fileSizeLabel, color = labelColor.copy(alpha = 0.75f), style = MaterialTheme.typography.labelSmall)
                         }
                         if (!mediaUrl.isNullOrBlank()) {
-                            Text("Tap to open", color = labelColor.copy(alpha = 0.75f), style = MaterialTheme.typography.labelSmall)
+                            Text(tr(locale, TextKey.OPEN_ACTION), color = labelColor.copy(alpha = 0.75f), style = MaterialTheme.typography.labelSmall)
                         }
                     }
                 }
@@ -1656,6 +1664,7 @@ private fun RemoteImagePreview(
     labelColor: Color,
     onOpen: (String) -> Unit
 ) {
+    val locale = if (LocalLayoutDirection.current == LayoutDirection.Rtl) AppLocale.AR else AppLocale.EN
     val imageBitmapState = produceState<android.graphics.Bitmap?>(initialValue = null, mediaUrl) {
         value = if (mediaUrl.isNullOrBlank()) {
             null
@@ -1699,10 +1708,10 @@ private fun RemoteImagePreview(
                     .background(Color.Black.copy(alpha = 0.38f))
                     .padding(horizontal = 8.dp, vertical = 6.dp)
             ) {
-                Text("Photo", color = Color.White, style = MaterialTheme.typography.labelSmall)
+                Text(tr(locale, TextKey.PHOTO), color = Color.White, style = MaterialTheme.typography.labelSmall)
             }
         } else {
-            Text("Tap to open image", color = labelColor, style = MaterialTheme.typography.bodyMedium)
+            Text(tr(locale, TextKey.TAP_TO_OPEN_IMAGE), color = labelColor, style = MaterialTheme.typography.bodyMedium)
         }
     }
     Spacer(Modifier.size(6.dp))
@@ -1715,6 +1724,7 @@ private fun VideoMessagePreview(
     labelColor: Color,
     onOpen: (String) -> Unit
 ) {
+    val locale = if (LocalLayoutDirection.current == LayoutDirection.Rtl) AppLocale.AR else AppLocale.EN
     val frameState = produceState<android.graphics.Bitmap?>(initialValue = null, mediaUrl) {
         value = if (mediaUrl.isNullOrBlank()) {
             null
@@ -1757,7 +1767,7 @@ private fun VideoMessagePreview(
             )
         } else {
             Text(
-                "Tap to open video",
+                tr(locale, TextKey.OPEN_ACTION),
                 color = labelColor,
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.align(Alignment.Center)
@@ -1786,7 +1796,7 @@ private fun VideoMessagePreview(
                 .padding(horizontal = 8.dp, vertical = 6.dp)
         ) {
             Text(
-                fileName?.let { "Video · $it" } ?: "Video",
+                fileName?.let { "${tr(locale, TextKey.VIDEO)} · $it" } ?: tr(locale, TextKey.VIDEO),
                 color = Color.White,
                 style = MaterialTheme.typography.labelSmall
             )
@@ -1801,6 +1811,7 @@ private fun InlineAudioPlayer(
     darkMode: Boolean,
     labelColor: Color
 ) {
+    val locale = if (LocalLayoutDirection.current == LayoutDirection.Rtl) AppLocale.AR else AppLocale.EN
     val context = LocalContext.current
     var mediaPlayer by remember(mediaUrl) { mutableStateOf<MediaPlayer?>(null) }
     var isPrepared by remember(mediaUrl) { mutableStateOf(false) }
@@ -1871,7 +1882,7 @@ private fun InlineAudioPlayer(
                     tint = labelColor
                 )
             }
-            Text("Audio message", color = labelColor, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+            Text(tr(locale, TextKey.AUDIO_MESSAGE), color = labelColor, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
         }
         AudioWaveform(
             progress = if (durationMs > 0) positionMs.toFloat() / durationMs.toFloat() else 0f,
@@ -1923,6 +1934,7 @@ private fun FullScreenImageDialog(
     imageUrl: String,
     onDismiss: () -> Unit
 ) {
+    val locale = if (LocalLayoutDirection.current == LayoutDirection.Rtl) AppLocale.AR else AppLocale.EN
     val bitmapState = produceState<android.graphics.Bitmap?>(initialValue = null, imageUrl) {
         value = withContext(Dispatchers.IO) {
             try {
@@ -1995,7 +2007,7 @@ private fun FullScreenImageDialog(
                     contentScale = ContentScale.Fit
                 )
             } else {
-                Text("Loading image...", color = Color(0xFF1F2937))
+                Text(tr(locale, TextKey.LOADING_IMAGE), color = Color(0xFF1F2937))
             }
         }
     }

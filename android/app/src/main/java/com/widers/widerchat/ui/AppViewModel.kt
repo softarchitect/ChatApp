@@ -84,7 +84,12 @@ class AppViewModel(
         }
     }
 
-    fun restoreSession(token: String, companyId: Long) {
+    fun restoreSession(
+        token: String,
+        companyId: Long,
+        fallbackProfileName: String = "",
+        fallbackProfileEmail: String = ""
+    ) {
         if (token.isBlank() || companyId <= 0) return
         val repo = networkRepo() ?: return
         viewModelScope.launch(Dispatchers.IO) {
@@ -99,8 +104,8 @@ class AppViewModel(
                     screen = AppScreen.CONVERSATIONS,
                     loginError = false,
                     conversations = conversations,
-                    profileName = profileName.orEmpty(),
-                    profileEmail = profileEmail.orEmpty()
+                    profileName = profileName.orEmpty().ifBlank { fallbackProfileName.trim() },
+                    profileEmail = profileEmail.orEmpty().ifBlank { fallbackProfileEmail.trim() }
                 )
             } catch (_: Exception) {
                 _uiState.value = _uiState.value.copy(isLoading = false, isLoggedIn = false, loginError = true)

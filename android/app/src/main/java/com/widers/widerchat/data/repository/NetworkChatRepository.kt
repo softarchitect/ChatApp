@@ -42,13 +42,21 @@ class NetworkChatRepository(
         val user = response.optJSONObject("user")
             ?: data?.optJSONObject("user")
             ?: response.optJSONObject("data_user")
+        val firstCompany = response.firstArray("companies")?.optJSONObject(0)
+            ?: data?.optJSONArray("companies")?.optJSONObject(0)
         val merchant = user?.optJSONObject("merchant")
             ?: data?.optJSONObject("merchant")
             ?: response.optJSONObject("merchant")
+        val responseName = response.firstString("name", "full_name", "username")
         sessionUserName = user?.firstString("name", "full_name", "username")
+            ?: responseName
+            ?: firstCompany?.firstString("name", "company_name")
             ?: merchant?.firstString("name", "company_name")
             ?: email.substringBefore("@").trim().replaceFirstChar { it.uppercaseChar() }
+        val responseEmail = response.firstString("email", "user_email")
+            ?: responseName?.takeIf { it.contains("@") }
         sessionUserEmail = user?.firstString("email", "user_email")
+            ?: responseEmail
             ?: response.firstString("email")
             ?: email.trim()
         return true

@@ -77,6 +77,7 @@ fun SettingsScreen(
     var soundEnabled by remember { mutableStateOf(true) }
     var showLangDialog by remember { mutableStateOf(false) }
     var showLogoutDialog by remember { mutableStateOf(false) }
+    var showProfileDialog by remember { mutableStateOf(false) }
     var showTagDialog by remember { mutableStateOf(false) }
     var showReplyDialog by remember { mutableStateOf(false) }
     var showContactDialog by remember { mutableStateOf(false) }
@@ -89,8 +90,15 @@ fun SettingsScreen(
     var contactName by remember { mutableStateOf("") }
     var contactPhone by remember { mutableStateOf("") }
     var contactEmail by remember { mutableStateOf("") }
-    val accountName = profileName.trim().ifBlank { "Account" }
-    val accountEmail = profileEmail.trim().ifBlank { "-" }
+    val accountName = profileName.trim().ifBlank { tr(locale, TextKey.ACCOUNT) }
+    val accountEmail = profileEmail
+        .trim()
+        .takeIf {
+            it.isNotBlank() &&
+                !it.equals(".", ignoreCase = true) &&
+                !it.equals("-", ignoreCase = true) &&
+                !it.equals("null", ignoreCase = true)
+        }
     val avatarInitials = remember(accountName) { initialsFrom(accountName) }
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -109,7 +117,9 @@ fun SettingsScreen(
                 .verticalScroll(rememberScrollState())
         ) {
             Surface(
-                modifier = Modifier.padding(horizontal = 20.dp),
+                modifier = Modifier
+                    .padding(horizontal = 20.dp)
+                    .clickable { showProfileDialog = true },
                 shape = RoundedCornerShape(16.dp),
                 color = MaterialTheme.colorScheme.surface
             ) {
@@ -127,20 +137,22 @@ fun SettingsScreen(
                     Spacer(Modifier.size(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(accountName, fontWeight = FontWeight.SemiBold)
-                        Text(accountEmail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (!accountEmail.isNullOrBlank()) {
+                            Text(accountEmail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
                     Icon(Icons.Outlined.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
 
             Spacer(Modifier.height(16.dp))
-            SettingsTitle("ACCOUNT")
+            SettingsTitle(tr(locale, TextKey.ACCOUNT).uppercase())
             FlatGroup {
-                FlatRow(icon = { Icon(Icons.Outlined.Person, null, tint = Color.White) }, iconBg = Color(0xFF3B82F6), label = "Profile", onClick = {})
+                FlatRow(icon = { Icon(Icons.Outlined.Person, null, tint = Color.White) }, iconBg = Color(0xFF3B82F6), label = tr(locale, TextKey.PROFILE), onClick = { showProfileDialog = true })
             }
 
             Spacer(Modifier.height(8.dp))
-            SettingsTitle("NOTIFICATION SETTINGS")
+            SettingsTitle(tr(locale, TextKey.NOTIFICATION_SETTINGS).uppercase())
             FlatGroup {
                 FlatToggleRow(icon = { Icon(Icons.Outlined.NotificationsActive, null, tint = Color.White) }, iconBg = Color(0xFFF43F5E), label = tr(locale, TextKey.PUSH_NOTIFICATIONS), checked = pushEnabled) { pushEnabled = it }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
@@ -148,23 +160,23 @@ fun SettingsScreen(
             }
 
             Spacer(Modifier.height(8.dp))
-            SettingsTitle("APPEARANCE")
+            SettingsTitle(tr(locale, TextKey.APPEARANCE).uppercase())
             FlatGroup {
-                FlatRow(icon = { Icon(Icons.Outlined.Language, null, tint = Color.White) }, iconBg = Color(0xFF06B6D4), label = tr(locale, TextKey.LANGUAGE), value = if (locale == AppLocale.EN) "English" else "العربية", onClick = { showLangDialog = true })
+                FlatRow(icon = { Icon(Icons.Outlined.Language, null, tint = Color.White) }, iconBg = Color(0xFF06B6D4), label = tr(locale, TextKey.LANGUAGE), value = if (locale == AppLocale.EN) tr(locale, TextKey.ENGLISH) else tr(locale, TextKey.ARABIC), onClick = { showLangDialog = true })
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
                 FlatToggleRow(icon = { Icon(Icons.Outlined.DarkMode, null, tint = Color.White) }, iconBg = Color(0xFF6366F1), label = tr(locale, TextKey.DARK_MODE), checked = darkMode, onCheckedChange = onDarkModeChange)
             }
 
             Spacer(Modifier.height(8.dp))
-            SettingsTitle("BACKEND TOOLS")
+            SettingsTitle(tr(locale, TextKey.BACKEND_TOOLS).uppercase())
             FlatGroup {
-                FlatRow(icon = { Icon(Icons.Outlined.Sync, null, tint = Color.White) }, iconBg = Color(0xFF0E8C56), label = "Sync support data", onClick = onSyncSupportData)
+                FlatRow(icon = { Icon(Icons.Outlined.Sync, null, tint = Color.White) }, iconBg = Color(0xFF0E8C56), label = tr(locale, TextKey.SYNC_SUPPORT_DATA), onClick = onSyncSupportData)
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
-                FlatRow(icon = { Icon(Icons.Outlined.Tag, null, tint = Color.White) }, iconBg = Color(0xFF7C3AED), label = "Create / Update Tag", onClick = { showTagDialog = true })
+                FlatRow(icon = { Icon(Icons.Outlined.Tag, null, tint = Color.White) }, iconBg = Color(0xFF7C3AED), label = tr(locale, TextKey.CREATE_UPDATE_TAG), onClick = { showTagDialog = true })
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
-                FlatRow(icon = { Icon(Icons.AutoMirrored.Outlined.Reply, null, tint = Color.White) }, iconBg = Color(0xFF0284C7), label = "Create / Update Reply", onClick = { showReplyDialog = true })
+                FlatRow(icon = { Icon(Icons.AutoMirrored.Outlined.Reply, null, tint = Color.White) }, iconBg = Color(0xFF0284C7), label = tr(locale, TextKey.CREATE_UPDATE_REPLY), onClick = { showReplyDialog = true })
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
-                FlatRow(icon = { Icon(Icons.Outlined.PersonAdd, null, tint = Color.White) }, iconBg = Color(0xFFF59E0B), label = "Add Contact", onClick = { showContactDialog = true })
+                FlatRow(icon = { Icon(Icons.Outlined.PersonAdd, null, tint = Color.White) }, iconBg = Color(0xFFF59E0B), label = tr(locale, TextKey.ADD_CONTACT_TITLE), onClick = { showContactDialog = true })
             }
 
             if (!actionStatus.isNullOrBlank()) {
@@ -178,7 +190,7 @@ fun SettingsScreen(
             }
 
             Spacer(Modifier.height(8.dp))
-            SettingsTitle("ABOUT")
+            SettingsTitle(tr(locale, TextKey.ABOUT).uppercase())
             FlatGroup {
                 FlatRow(icon = { Icon(Icons.Outlined.Shield, null, tint = Color.White) }, iconBg = Color(0xFF10B981), label = tr(locale, TextKey.PRIVACY_POLICY), onClick = onOpenPrivacy)
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
@@ -214,10 +226,25 @@ fun SettingsScreen(
             title = { Text(tr(locale, TextKey.LANGUAGE)) },
             text = {
                 Column {
-                    TextButton(onClick = { onLocaleChange(AppLocale.EN); showLangDialog = false }) { Text("English") }
-                    TextButton(onClick = { onLocaleChange(AppLocale.AR); showLangDialog = false }) { Text("العربية") }
+                    TextButton(onClick = { onLocaleChange(AppLocale.EN); showLangDialog = false }) { Text(tr(locale, TextKey.ENGLISH)) }
+                    TextButton(onClick = { onLocaleChange(AppLocale.AR); showLangDialog = false }) { Text(tr(locale, TextKey.ARABIC)) }
                 }
             },
+            confirmButton = {}
+        )
+    }
+
+    if (showProfileDialog) {
+        AlertDialog(
+            onDismissRequest = { showProfileDialog = false },
+            title = { Text(tr(locale, TextKey.PROFILE)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("${tr(locale, TextKey.NAME_LABEL)}: $accountName")
+                    Text("${tr(locale, TextKey.EMAIL_LABEL)}: ${accountEmail ?: tr(locale, TextKey.UNAVAILABLE)}")
+                }
+            },
+            dismissButton = { TextButton(onClick = { showProfileDialog = false }) { Text(tr(locale, TextKey.CLOSE)) } },
             confirmButton = {}
         )
     }
@@ -240,22 +267,22 @@ fun SettingsScreen(
     if (showTagDialog) {
         AlertDialog(
             onDismissRequest = { showTagDialog = false },
-            title = { Text("Create / Update Tag") },
+            title = { Text(tr(locale, TextKey.CREATE_UPDATE_TAG)) },
             text = {
                 Column {
-                    androidx.compose.material3.OutlinedTextField(tagName, { tagName = it }, label = { Text("Tag name") })
+                    androidx.compose.material3.OutlinedTextField(tagName, { tagName = it }, label = { Text(tr(locale, TextKey.TAG_NAME)) })
                     Spacer(Modifier.size(8.dp))
-                    androidx.compose.material3.OutlinedTextField(tagColor, { tagColor = it }, label = { Text("Tag color #hex") })
+                    androidx.compose.material3.OutlinedTextField(tagColor, { tagColor = it }, label = { Text(tr(locale, TextKey.TAG_COLOR_HEX)) })
                     Spacer(Modifier.size(8.dp))
-                    androidx.compose.material3.OutlinedTextField(tagId, { tagId = it }, label = { Text("Tag ID (optional)") })
+                    androidx.compose.material3.OutlinedTextField(tagId, { tagId = it }, label = { Text(tr(locale, TextKey.TAG_ID_OPTIONAL)) })
                 }
             },
-            dismissButton = { TextButton(onClick = { showTagDialog = false }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { showTagDialog = false }) { Text(tr(locale, TextKey.CANCEL)) } },
             confirmButton = {
                 TextButton(onClick = {
                     onCreateTag(tagName, tagColor, tagId.toLongOrNull())
                     showTagDialog = false
-                }) { Text("Save") }
+                }) { Text(tr(locale, TextKey.SAVE)) }
             }
         )
     }
@@ -263,22 +290,22 @@ fun SettingsScreen(
     if (showReplyDialog) {
         AlertDialog(
             onDismissRequest = { showReplyDialog = false },
-            title = { Text("Create / Update Reply") },
+            title = { Text(tr(locale, TextKey.CREATE_UPDATE_REPLY)) },
             text = {
                 Column {
-                    androidx.compose.material3.OutlinedTextField(replyName, { replyName = it }, label = { Text("Reply name") })
+                    androidx.compose.material3.OutlinedTextField(replyName, { replyName = it }, label = { Text(tr(locale, TextKey.REPLY_NAME)) })
                     Spacer(Modifier.size(8.dp))
-                    androidx.compose.material3.OutlinedTextField(replyText, { replyText = it }, label = { Text("Reply text") })
+                    androidx.compose.material3.OutlinedTextField(replyText, { replyText = it }, label = { Text(tr(locale, TextKey.REPLY_TEXT)) })
                     Spacer(Modifier.size(8.dp))
-                    androidx.compose.material3.OutlinedTextField(replyId, { replyId = it }, label = { Text("Reply ID (optional)") })
+                    androidx.compose.material3.OutlinedTextField(replyId, { replyId = it }, label = { Text(tr(locale, TextKey.REPLY_ID_OPTIONAL)) })
                 }
             },
-            dismissButton = { TextButton(onClick = { showReplyDialog = false }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { showReplyDialog = false }) { Text(tr(locale, TextKey.CANCEL)) } },
             confirmButton = {
                 TextButton(onClick = {
                     onCreateReply(replyName, replyText, replyId.toLongOrNull())
                     showReplyDialog = false
-                }) { Text("Save") }
+                }) { Text(tr(locale, TextKey.SAVE)) }
             }
         )
     }
@@ -286,22 +313,22 @@ fun SettingsScreen(
     if (showContactDialog) {
         AlertDialog(
             onDismissRequest = { showContactDialog = false },
-            title = { Text("Add Contact") },
+            title = { Text(tr(locale, TextKey.ADD_CONTACT_TITLE)) },
             text = {
                 Column {
-                    androidx.compose.material3.OutlinedTextField(contactName, { contactName = it }, label = { Text("Name") })
+                    androidx.compose.material3.OutlinedTextField(contactName, { contactName = it }, label = { Text(tr(locale, TextKey.NAME_LABEL)) })
                     Spacer(Modifier.size(8.dp))
-                    androidx.compose.material3.OutlinedTextField(contactPhone, { contactPhone = it }, label = { Text("Phone") })
+                    androidx.compose.material3.OutlinedTextField(contactPhone, { contactPhone = it }, label = { Text(tr(locale, TextKey.PHONE_LABEL)) })
                     Spacer(Modifier.size(8.dp))
-                    androidx.compose.material3.OutlinedTextField(contactEmail, { contactEmail = it }, label = { Text("Email (optional)") })
+                    androidx.compose.material3.OutlinedTextField(contactEmail, { contactEmail = it }, label = { Text(tr(locale, TextKey.EMAIL_OPTIONAL)) })
                 }
             },
-            dismissButton = { TextButton(onClick = { showContactDialog = false }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { showContactDialog = false }) { Text(tr(locale, TextKey.CANCEL)) } },
             confirmButton = {
                 TextButton(onClick = {
                     onAddContact(contactName, contactPhone, contactEmail.ifBlank { null })
                     showContactDialog = false
-                }) { Text("Add") }
+                }) { Text(tr(locale, TextKey.ADD)) }
             }
         )
     }

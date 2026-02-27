@@ -67,7 +67,12 @@ fun WidersApp(viewModel: AppViewModel = viewModel()) {
             attemptedAutoLogin = true
             val saved = secureSessionStore.read()
             if (saved != null) {
-                viewModel.restoreSession(token = saved.token, companyId = saved.companyId)
+                viewModel.restoreSession(
+                    token = saved.token,
+                    companyId = saved.companyId,
+                    fallbackProfileName = saved.profileName,
+                    fallbackProfileEmail = saved.profileEmail
+                )
             }
         }
     }
@@ -75,7 +80,14 @@ fun WidersApp(viewModel: AppViewModel = viewModel()) {
     LaunchedEffect(state.isLoggedIn) {
         if (state.isLoggedIn) {
             viewModel.sessionSnapshot()?.let { (token, companyId) ->
-                secureSessionStore.save(StoredSession(token = token, companyId = companyId))
+                secureSessionStore.save(
+                    StoredSession(
+                        token = token,
+                        companyId = companyId,
+                        profileName = state.profileName,
+                        profileEmail = state.profileEmail
+                    )
+                )
             }
         }
     }

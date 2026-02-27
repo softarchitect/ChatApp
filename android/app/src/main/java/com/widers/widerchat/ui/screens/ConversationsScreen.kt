@@ -204,7 +204,7 @@ fun ConversationsScreen(
                             onSearchContacts(it)
                         },
                         singleLine = true,
-                        label = { Text("Search contacts") }
+                        label = { Text(tr(locale, TextKey.SEARCH_CONTACTS)) }
                     )
                     Text(
                         text = tr(locale, TextKey.NEW_CONVERSATION_MESSAGE),
@@ -214,7 +214,7 @@ fun ConversationsScreen(
                     Spacer(Modifier.height(10.dp))
                     if (contactsLoading) {
                         Text(
-                            text = "Loading contacts...",
+                            text = tr(locale, TextKey.LOADING_CONTACTS),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

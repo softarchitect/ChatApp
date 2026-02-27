@@ -35,6 +35,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.widers.widerchat.core.TextKey
+import com.widers.widerchat.core.tr
 import com.widers.widerchat.domain.model.AppLocale
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -44,16 +46,30 @@ fun TermsScreen(
     locale: AppLocale,
     onBack: () -> Unit
 ) {
-    val sections = listOf(
-        "Account Registration" to "To use Widers, you must register for a merchant account and provide accurate information. You are responsible for keeping account credentials secure.",
-        "Acceptable Use" to "You agree to use the service only for lawful purposes and in compliance with WhatsApp Business policies. No spam, abuse, or impersonation.",
-        "Subscription & Billing" to "Access to Widers is subscription-based. Plans are billed monthly or annually according to the selected package.",
-        "Service Level Agreement" to "We strive to maintain high platform uptime. Scheduled maintenance windows will be communicated in advance.",
-        "Intellectual Property" to "Widers platform design and features are protected. You retain ownership of your own customer content and messages.",
-        "Limitation of Liability" to "To the maximum extent permitted by law, Widers is not liable for indirect or consequential damages.",
-        "Termination" to "Either party may terminate the service. Data retention and deletion policies apply as defined in the agreement.",
-        "Governing Law" to "Any disputes are resolved according to applicable governing law and dispute-resolution terms."
-    )
+    val isAr = locale == AppLocale.AR
+    val sections = if (isAr) {
+        listOf(
+            "تسجيل الحساب" to "لاستخدام وايدرز، يجب تسجيل حساب تاجر وتقديم معلومات صحيحة. أنت مسؤول عن الحفاظ على سرية بيانات تسجيل الدخول.",
+            "الاستخدام المقبول" to "توافق على استخدام الخدمة لأغراض قانونية فقط وبما يتوافق مع سياسات واتساب للأعمال. يُمنع الإزعاج أو الإساءة أو انتحال الهوية.",
+            "الاشتراك والفوترة" to "الوصول إلى وايدرز قائم على الاشتراك. يتم تحصيل الرسوم شهريًا أو سنويًا حسب الباقة المختارة.",
+            "اتفاقية مستوى الخدمة" to "نسعى للحفاظ على جاهزية عالية للمنصة. سيتم إشعارك مسبقًا بنوافذ الصيانة المجدولة.",
+            "الملكية الفكرية" to "تصميم وميزات منصة وايدرز محمية. وتظل ملكية محتوى ورسائل العملاء الخاصة بك لك.",
+            "تحديد المسؤولية" to "إلى أقصى حد يسمح به القانون، لا تتحمل وايدرز المسؤولية عن الأضرار غير المباشرة أو التبعية.",
+            "إنهاء الخدمة" to "يجوز لأي طرف إنهاء الخدمة. وتُطبق سياسات الاحتفاظ بالبيانات والحذف وفقًا للاتفاقية.",
+            "القانون الحاكم" to "تُحل النزاعات وفق القانون الحاكم المعمول به وبنود تسوية النزاعات."
+        )
+    } else {
+        listOf(
+            "Account Registration" to "To use Widers, you must register for a merchant account and provide accurate information. You are responsible for keeping account credentials secure.",
+            "Acceptable Use" to "You agree to use the service only for lawful purposes and in compliance with WhatsApp Business policies. No spam, abuse, or impersonation.",
+            "Subscription & Billing" to "Access to Widers is subscription-based. Plans are billed monthly or annually according to the selected package.",
+            "Service Level Agreement" to "We strive to maintain high platform uptime. Scheduled maintenance windows will be communicated in advance.",
+            "Intellectual Property" to "Widers platform design and features are protected. You retain ownership of your own customer content and messages.",
+            "Limitation of Liability" to "To the maximum extent permitted by law, Widers is not liable for indirect or consequential damages.",
+            "Termination" to "Either party may terminate the service. Data retention and deletion policies apply as defined in the agreement.",
+            "Governing Law" to "Any disputes are resolved according to applicable governing law and dispute-resolution terms."
+        )
+    }
 
     val icons = listOf(
         Icons.Outlined.AccountCircle,
@@ -66,7 +82,13 @@ fun TermsScreen(
         Icons.Outlined.Gavel
     )
 
-    val title = if (locale == AppLocale.AR) "شروط الخدمة" else "Terms of Service"
+    val title = if (isAr) "شروط الخدمة" else "Terms of Service"
+    val updatedDate = if (isAr) "25 فبراير 2026" else "February 25, 2026"
+    val intro = if (isAr) {
+        "تحكم شروط الخدمة هذه وصولك واستخدامك لمنصة وايدرز، بما في ذلك خدمات WhatsApp Business Cloud API وتطبيق الهاتف."
+    } else {
+        "These Terms of Service govern your access and use of the Widers platform, including our WhatsApp Business Cloud API services and mobile application."
+    }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -88,20 +110,20 @@ fun TermsScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
                         Text(
-                            "  LAST UPDATED  ",
+                            "  ${tr(locale, TextKey.LAST_UPDATED)}  ",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
                     }
                     Text(
-                        "February 25, 2026",
+                        updatedDate,
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        "These Terms of Service govern your access and use of the Widers platform, including our WhatsApp Business Cloud API services and mobile application.",
+                        intro,
                         modifier = Modifier.padding(top = 12.dp),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant

@@ -39,20 +39,40 @@ fun VersionScreen(
     locale: AppLocale,
     onBack: () -> Unit
 ) {
-    val title = if (locale == AppLocale.AR) "حول وايدرز" else "About Widers"
-    val description = if (locale == AppLocale.AR) {
+    val isAr = locale == AppLocale.AR
+    val title = if (isAr) "حول وايدرز" else "About Widers"
+    val description = if (isAr) {
         "وايدرز منصة معتمدة من ميتا لإدارة محادثات واتساب للأعمال في الوقت الفعلي مع فرق متعددة."
     } else {
         "Widers is a Meta-approved WhatsApp Business Cloud API provider helping teams manage customer conversations at scale."
     }
-    val features = listOf(
-        "Real-time WhatsApp Business messaging",
-        "Multi-agent conversation management",
-        "Internal notes and team collaboration",
-        "Conversation analytics and reporting",
-        "Automated message routing and assignment",
-        "Template message management"
-    )
+    val partnerBadge = if (isAr) "شريك معتمد من ميتا" else "META APPROVED PARTNER"
+    val versionLabel = if (isAr) "الإصدار" else "Version"
+    val buildLabel = if (isAr) "البناء" else "Build"
+    val environmentLabel = if (isAr) "البيئة" else "Environment"
+    val apiVersionLabel = if (isAr) "إصدار API" else "API Version"
+    val whatsappApiLabel = if (isAr) "واجهة WhatsApp Cloud API" else "WhatsApp Cloud API"
+    val featuresTitle = if (isAr) "أهم الميزات" else "KEY FEATURES"
+    val productionValue = if (isAr) "الإنتاج" else "Production"
+    val features = if (isAr) {
+        listOf(
+            "مراسلة واتساب للأعمال في الوقت الفعلي",
+            "إدارة المحادثات بواسطة عدة وكلاء",
+            "ملاحظات داخلية وتعاون الفريق",
+            "تحليلات وتقارير المحادثات",
+            "توجيه الرسائل وتعيينها تلقائيًا",
+            "إدارة قوالب الرسائل"
+        )
+    } else {
+        listOf(
+            "Real-time WhatsApp Business messaging",
+            "Multi-agent conversation management",
+            "Internal notes and team collaboration",
+            "Conversation analytics and reporting",
+            "Automated message routing and assignment",
+            "Template message management"
+        )
+    }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -87,7 +107,7 @@ fun VersionScreen(
                         contentScale = ContentScale.Fit
                     )
                     Text("Widers", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 10.dp))
-                    Text("META APPROVED PARTNER", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                    Text(partnerBadge, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                     Text(
                         description,
                         modifier = Modifier.padding(top = 10.dp),
@@ -100,16 +120,16 @@ fun VersionScreen(
 
             Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
                 Column(modifier = Modifier.padding(vertical = 4.dp)) {
-                    InfoRow("Version", "1.0.0")
-                    InfoRow("Build", "2026.02.25")
-                    InfoRow("Environment", "Production")
-                    InfoRow("API Version", "v2.0")
-                    InfoRow("WhatsApp Cloud API", "v21.0")
+                    InfoRow(versionLabel, "1.0.0")
+                    InfoRow(buildLabel, "2026.02.25")
+                    InfoRow(environmentLabel, productionValue)
+                    InfoRow(apiVersionLabel, "v2.0")
+                    InfoRow(whatsappApiLabel, "v21.0")
                 }
             }
 
             Column(modifier = Modifier.fillMaxWidth()) {
-                Text("KEY FEATURES", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(featuresTitle, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Card(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), shape = RoundedCornerShape(16.dp)) {
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         for (f in features) {
