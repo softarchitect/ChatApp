@@ -345,15 +345,16 @@ struct ChatView: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 6) {
                             ForEach(filteredEmojisForSelectedCategory, id: \.self) { emoji in
-                            Button {
+                                Button {
                                     addEmojiToInput(emoji)
-                            } label: {
-                                Text(emoji)
-                                    .font(.system(size: 24))
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
+                                } label: {
+                                    Text(emoji)
+                                        .font(.system(size: 24))
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                }
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
                         }
                         .padding(.horizontal, 12)
                     }
