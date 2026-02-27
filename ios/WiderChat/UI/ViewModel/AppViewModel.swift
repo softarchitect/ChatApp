@@ -225,7 +225,8 @@ final class AppViewModel: ObservableObject {
             let ok = await repository.sendMedia(
                 conversationId: convoId,
                 fileName: fileName,
-                fileData: fileData
+                fileData: fileData,
+                text: nil
             )
             guard ok else {
                 actionStatus = "Failed: unable to upload \(kindLabel.lowercased())"
@@ -524,7 +525,7 @@ final class AppViewModel: ObservableObject {
         }
         Task { @MainActor in
             isActionLoading = true
-            let result = await repository.searchChats(keyword: keyword)
+            let result = await repository.searchChats(keyword: keyword, page: 1, limit: 50)
             isActionLoading = false
             guard result != nil else {
                 actionStatus = "Failed: search request"
@@ -546,10 +547,12 @@ final class AppViewModel: ObservableObject {
         let local = localOutgoingByConversation[conversationId] ?? []
         guard !local.isEmpty else { return remote }
         let existing = Set(remote.map(\.id))
-        let existingSignatures = Set(remote.map { ($0.content.trimmingCharacters(in: .whitespacesAndNewlines), $0.sender == .agent) })
+        let existingSignatures = Set(remote.map { message in
+            "\(message.sender == .agent)|\(message.content.trimmingCharacters(in: .whitespacesAndNewlines))"
+        })
         return remote + local.filter {
             !existing.contains($0.id) &&
-            !existingSignatures.contains(($0.content.trimmingCharacters(in: .whitespacesAndNewlines), $0.sender == .agent))
+            !existingSignatures.contains("\($0.sender == .agent)|\($0.content.trimmingCharacters(in: .whitespacesAndNewlines))")
         }
     }
 

@@ -90,9 +90,15 @@ final class WidersRepository: ChatRepository {
                 if item.isSkippableEmptyOutgoing(content: content, media: media, messageTypeCode: messageTypeCode) {
                     return nil
                 }
-                let isAgent = item.firstBool(keys: ["from_me", "is_agent", "agent"])
-                    ?? ((item.firstInt(keys: ["is_message_by_contact"]) ?? 1) == 0)
-                    ?? (item.firstString(keys: ["sender", "sender_type"]) == "agent")
+                let isAgent: Bool = {
+                    if let explicit = item.firstBool(keys: ["from_me", "is_agent", "agent"]) {
+                        return explicit
+                    }
+                    if let contactFlag = item.firstInt(keys: ["is_message_by_contact"]) {
+                        return contactFlag == 0
+                    }
+                    return item.firstString(keys: ["sender", "sender_type"]) == "agent"
+                }()
                 return ChatMessage(
                     id: item.firstString(keys: ["id", "message_id", "wamid"]) ?? "msg-\(index)",
                     conversationId: conversationId,
