@@ -27,12 +27,17 @@ struct AppBackHeader: View {
 struct PolicyHero: View {
     let date: String
     let intro: String
+    @Environment(\.layoutDirection) private var layoutDirection
+
+    private var locale: AppLocale {
+        layoutDirection == .rightToLeft ? .ar : .en
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
                 Rectangle().fill(AppPalette.border.opacity(0.9)).frame(height: 1)
-                Text("LAST UPDATED")
+                Text(tr(locale, .lastUpdated))
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(AppPalette.textMuted)
                 Rectangle().fill(AppPalette.border.opacity(0.9)).frame(height: 1)

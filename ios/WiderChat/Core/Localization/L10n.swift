@@ -16,6 +16,28 @@ enum TextKey {
     case today
     case newConversationTitle, newConversationMessage, nameLabel, phoneLabel, create
     case camera, gallery, document, audio, stopSendVoice
+    case contactInfo, status, presence, mediaLinksDocs, mute, unmute, delete
+    case mediaLinksDocsTitle, close, noItemsInTab
+    case photo, video, link, unavailable, noUrlFromBackend, unableToLoadAudio
+    case mediaTab, docsTab, linksTab
+    case tapToOpenImage, openAction, failedToLoadImage, audioMessage, mediaMessage
+    case location
+    case internalNoteBadge, youLabel
+    case assignAgent, unassignAgent, muteConversation, unmuteConversation
+    case markAsRead, markAsUnread, attachDetachTag, sendTemplate, sendFlow, syncCustomField
+    case deleteChat
+    case assignAgentTitle, agentId
+    case attachDetachTagTitle, tagId, attach, detach
+    case sendTemplateTitle, templateId
+    case sendFlowTitle, flowId
+    case syncCustomFieldTitle, fieldId, fieldValue, sync
+    case deleteChatQuestion, deleteChatEndpointHint
+    case callUnavailable, callUnavailableMessage, ok
+    case lastUpdated
+    case backendTools, profile, syncSupportData
+    case createUpdateTag, tagName, tagColorHex, tagIdOptional, save
+    case createUpdateReply, replyName, replyText, replyIdOptional
+    case addContactTitle, emailOptional, add
 }
 
 func tr(_ locale: AppLocale, _ key: TextKey) -> String {
@@ -80,5 +102,78 @@ func tr(_ locale: AppLocale, _ key: TextKey) -> String {
     case .document: return ar ? "مستند" : "Document"
     case .audio: return ar ? "صوت" : "Audio"
     case .stopSendVoice: return ar ? "إيقاف وإرسال الصوت" : "Stop & send voice"
+    case .contactInfo: return ar ? "معلومات جهة الاتصال" : "Contact info"
+    case .status: return ar ? "الحالة" : "Status"
+    case .presence: return ar ? "التواجد" : "Presence"
+    case .mediaLinksDocs: return ar ? "الوسائط والروابط والمستندات" : "Media, links and docs"
+    case .mute: return ar ? "كتم" : "Mute"
+    case .unmute: return ar ? "إلغاء الكتم" : "Unmute"
+    case .delete: return ar ? "حذف" : "Delete"
+    case .mediaLinksDocsTitle: return ar ? "الوسائط والروابط والمستندات" : "Media, links and docs"
+    case .close: return ar ? "إغلاق" : "Close"
+    case .noItemsInTab: return ar ? "لا توجد عناصر في هذا التبويب." : "No items in this tab."
+    case .photo: return ar ? "صورة" : "Photo"
+    case .video: return ar ? "فيديو" : "Video"
+    case .link: return ar ? "رابط" : "Link"
+    case .unavailable: return ar ? "غير متاح" : "Unavailable"
+    case .noUrlFromBackend: return ar ? "لا يوجد رابط من الخادم" : "No URL from backend"
+    case .unableToLoadAudio: return ar ? "تعذر تحميل الصوت." : "Unable to load audio."
+    case .mediaTab: return ar ? "وسائط" : "Media"
+    case .docsTab: return ar ? "مستندات" : "Docs"
+    case .linksTab: return ar ? "روابط" : "Links"
+    case .tapToOpenImage: return ar ? "اضغط لفتح الصورة" : "Tap to open image"
+    case .openAction: return ar ? "فتح" : "Open"
+    case .failedToLoadImage: return ar ? "تعذر تحميل الصورة" : "Failed to load image"
+    case .audioMessage: return ar ? "رسالة صوتية" : "Audio message"
+    case .mediaMessage: return ar ? "رسالة وسائط" : "Media message"
+    case .location: return ar ? "موقع" : "Location"
+    case .internalNoteBadge: return ar ? "ملاحظة داخلية" : "INTERNAL NOTE"
+    case .youLabel: return ar ? "أنت" : "You"
+    case .assignAgent: return ar ? "تعيين وكيل" : "Assign agent"
+    case .unassignAgent: return ar ? "إلغاء تعيين الوكيل" : "Unassign agent"
+    case .muteConversation: return ar ? "كتم المحادثة" : "Mute conversation"
+    case .unmuteConversation: return ar ? "إلغاء كتم المحادثة" : "Unmute conversation"
+    case .markAsRead: return ar ? "تحديد كمقروء" : "Mark as read"
+    case .markAsUnread: return ar ? "تحديد كغير مقروء" : "Mark as unread"
+    case .attachDetachTag: return ar ? "إرفاق / إزالة وسم" : "Attach / detach tag"
+    case .sendTemplate: return ar ? "إرسال قالب" : "Send template"
+    case .sendFlow: return ar ? "إرسال تدفق" : "Send flow"
+    case .syncCustomField: return ar ? "مزامنة حقل مخصص" : "Sync custom field"
+    case .deleteChat: return ar ? "حذف المحادثة" : "Delete chat"
+    case .assignAgentTitle: return ar ? "تعيين وكيل" : "Assign agent"
+    case .agentId: return ar ? "معرّف الوكيل" : "Agent ID"
+    case .attachDetachTagTitle: return ar ? "إرفاق / إزالة وسم" : "Attach / detach tag"
+    case .tagId: return ar ? "معرّف الوسم" : "Tag ID"
+    case .attach: return ar ? "إرفاق" : "Attach"
+    case .detach: return ar ? "إزالة" : "Detach"
+    case .sendTemplateTitle: return ar ? "إرسال قالب" : "Send template"
+    case .templateId: return ar ? "معرّف القالب" : "Template ID"
+    case .sendFlowTitle: return ar ? "إرسال تدفق" : "Send flow"
+    case .flowId: return ar ? "معرّف التدفق" : "Flow ID"
+    case .syncCustomFieldTitle: return ar ? "مزامنة حقل مخصص" : "Sync custom field"
+    case .fieldId: return ar ? "معرّف الحقل" : "Field ID"
+    case .fieldValue: return ar ? "قيمة الحقل" : "Field Value"
+    case .sync: return ar ? "مزامنة" : "Sync"
+    case .deleteChatQuestion: return ar ? "حذف المحادثة؟" : "Delete chat?"
+    case .deleteChatEndpointHint: return ar ? "سيستدعي هذا إجراء حذف المحادثة لجهة الاتصال الحالية." : "This calls delete chat endpoint for this contact."
+    case .callUnavailable: return ar ? "الاتصال غير متاح" : "Call unavailable"
+    case .callUnavailableMessage: return ar ? "رقم الهاتف غير متاح لجهة الاتصال هذه." : "Phone number is unavailable for this contact."
+    case .ok: return ar ? "حسنًا" : "OK"
+    case .lastUpdated: return ar ? "آخر تحديث" : "LAST UPDATED"
+    case .backendTools: return ar ? "أدوات الخادم" : "Backend tools"
+    case .profile: return ar ? "الملف الشخصي" : "Profile"
+    case .syncSupportData: return ar ? "مزامنة بيانات الدعم" : "Sync support data"
+    case .createUpdateTag: return ar ? "إنشاء / تحديث وسم" : "Create / Update Tag"
+    case .tagName: return ar ? "اسم الوسم" : "Tag name"
+    case .tagColorHex: return ar ? "لون الوسم (#hex)" : "Tag color (#hex)"
+    case .tagIdOptional: return ar ? "معرّف الوسم (اختياري)" : "Tag ID (optional)"
+    case .save: return ar ? "حفظ" : "Save"
+    case .createUpdateReply: return ar ? "إنشاء / تحديث رد" : "Create / Update Reply"
+    case .replyName: return ar ? "اسم الرد" : "Reply name"
+    case .replyText: return ar ? "نص الرد" : "Reply text"
+    case .replyIdOptional: return ar ? "معرّف الرد (اختياري)" : "Reply ID (optional)"
+    case .addContactTitle: return ar ? "إضافة جهة اتصال" : "Add Contact"
+    case .emailOptional: return ar ? "البريد الإلكتروني (اختياري)" : "Email (optional)"
+    case .add: return ar ? "إضافة" : "Add"
     }
 }

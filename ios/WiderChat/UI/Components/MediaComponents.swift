@@ -13,15 +13,20 @@ struct MediaMessageView: View {
     @State private var showImageViewer = false
     @State private var showDocumentViewer = false
     @State private var showVideoPlayer = false
+    @Environment(\.layoutDirection) private var layoutDirection
+
+    private var locale: AppLocale {
+        layoutDirection == .rightToLeft ? .ar : .en
+    }
 
     var kindTitle: String {
         switch mediaKind.lowercased() {
-        case "image": return "Image"
-        case "audio": return "Audio"
-        case "video": return "Video"
-        case "document": return "Document"
-        case "location": return "Location"
-        default: return "Media"
+        case "image": return tr(locale, .photo)
+        case "audio": return tr(locale, .audio)
+        case "video": return tr(locale, .video)
+        case "document": return tr(locale, .document)
+        case "location": return tr(locale, .location)
+        default: return tr(locale, .mediaMessage)
         }
     }
 
@@ -45,7 +50,7 @@ struct MediaMessageView: View {
                                     .frame(width: 220, height: 140)
                                     .clipped()
                             case .failure(_):
-                                Text("Tap to open image")
+                                Text(tr(locale, .tapToOpenImage))
                                     .font(.system(size: 13, weight: .semibold))
                                     .foregroundStyle(darkMode ? Color(red: 0.74, green: 0.86, blue: 1.0) : Color(red: 0.11, green: 0.34, blue: 0.78))
                             default:
@@ -56,7 +61,7 @@ struct MediaMessageView: View {
                         VStack {
                             Spacer()
                             HStack {
-                                Label("Photo", systemImage: "photo.fill")
+                                Label(tr(locale, .photo), systemImage: "photo.fill")
                                     .font(.system(size: 11, weight: .semibold))
                                     .foregroundStyle(.white)
                                 Spacer()
@@ -88,7 +93,7 @@ struct MediaMessageView: View {
                 HStack(spacing: 8) {
                     Image(systemName: iconName(for: mediaKind))
                         .font(.system(size: 15, weight: .semibold))
-                    Text("\(kindTitle) message")
+                    Text(kindTitle)
                         .font(.system(size: 14, weight: .medium))
                 }
                 .foregroundStyle(darkMode ? Color(red: 0.74, green: 0.86, blue: 1.0) : Color(red: 0.11, green: 0.34, blue: 0.78))
@@ -98,7 +103,7 @@ struct MediaMessageView: View {
                         Button {
                             showDocumentViewer = true
                         } label: {
-                            Text("Open \(kindTitle.lowercased())\(fileName(from: mediaUrl).map { " · \($0)" } ?? "")")
+                            Text("\(tr(locale, .openAction)) \(kindTitle)\(fileName(from: mediaUrl).map { " · \($0)" } ?? "")")
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundStyle(darkMode ? Color(red: 0.74, green: 0.86, blue: 1.0) : Color(red: 0.11, green: 0.34, blue: 0.78))
                         }
@@ -108,7 +113,7 @@ struct MediaMessageView: View {
                         }
                     } else {
                         Link(destination: url) {
-                            Text("Open \(kindTitle.lowercased())\(fileName(from: mediaUrl).map { " · \($0)" } ?? "")")
+                            Text("\(tr(locale, .openAction)) \(kindTitle)\(fileName(from: mediaUrl).map { " · \($0)" } ?? "")")
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundStyle(darkMode ? Color(red: 0.74, green: 0.86, blue: 1.0) : Color(red: 0.11, green: 0.34, blue: 0.78))
                         }
@@ -148,6 +153,11 @@ private struct VideoMessageThumbnail: View {
     let url: URL
     let darkMode: Bool
     @State private var thumbnail: UIImage?
+    @Environment(\.layoutDirection) private var layoutDirection
+
+    private var locale: AppLocale {
+        layoutDirection == .rightToLeft ? .ar : .en
+    }
 
     var body: some View {
         ZStack {
@@ -178,7 +188,7 @@ private struct VideoMessageThumbnail: View {
             VStack {
                 Spacer()
                 HStack {
-                    Text("Video")
+                    Text(tr(locale, .video))
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.white)
                     Spacer()
@@ -387,6 +397,11 @@ struct InlineAudioMessageView: View {
     @State private var currentSeconds: Double = 0
     @State private var durationSeconds: Double = 0
     @State private var timer: Timer?
+    @Environment(\.layoutDirection) private var layoutDirection
+
+    private var locale: AppLocale {
+        layoutDirection == .rightToLeft ? .ar : .en
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -398,7 +413,7 @@ struct InlineAudioMessageView: View {
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(darkMode ? Color(red: 0.74, green: 0.86, blue: 1.0) : Color(red: 0.11, green: 0.34, blue: 0.78))
                 }
-                Text("Audio message")
+                Text(tr(locale, .audioMessage))
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(darkMode ? Color(red: 0.74, green: 0.86, blue: 1.0) : Color(red: 0.11, green: 0.34, blue: 0.78))
                 Spacer()
@@ -496,11 +511,16 @@ struct InlineAudioMessageView: View {
 struct ZoomableImageViewer: View {
     let imageURL: URL
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.layoutDirection) private var layoutDirection
 
     @State private var scale: CGFloat = 1
     @State private var lastScale: CGFloat = 1
     @State private var offset: CGSize = .zero
     @State private var lastOffset: CGSize = .zero
+
+    private var locale: AppLocale {
+        layoutDirection == .rightToLeft ? .ar : .en
+    }
 
     var body: some View {
         GeometryReader { geo in
@@ -561,7 +581,7 @@ struct ZoomableImageViewer: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .padding()
                     case .failure(_):
-                        Text("Failed to load image")
+                        Text(tr(locale, .failedToLoadImage))
                             .foregroundStyle(AppPalette.textPrimary)
                     default:
                         ProgressView()

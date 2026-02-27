@@ -63,13 +63,13 @@ struct SettingsView: View {
                     .padding(.horizontal, 20)
 
                     Spacer().frame(height: 16)
-                    settingsTitle("ACCOUNT")
+                    settingsTitle(tr(vm.locale, .account).uppercased())
                     flatGroup {
-                        flatRow(icon: "person.fill", iconBg: Color(red: 0.23, green: 0.51, blue: 0.96), label: "Profile", value: nil, onTap: {})
+                        flatRow(icon: "person.fill", iconBg: Color(red: 0.23, green: 0.51, blue: 0.96), label: tr(vm.locale, .profile), value: nil, onTap: {})
                     }
 
                     Spacer().frame(height: 8)
-                    settingsTitle("NOTIFICATION SETTINGS")
+                    settingsTitle(tr(vm.locale, .notificationSettings).uppercased())
                     flatGroup {
                         flatToggleRow(icon: "bell.badge.fill", iconBg: Color(red: 0.96, green: 0.25, blue: 0.37), label: tr(vm.locale, .pushNotifications), isOn: $pushEnabled)
                         sectionDivider()
@@ -77,7 +77,7 @@ struct SettingsView: View {
                     }
 
                     Spacer().frame(height: 8)
-                    settingsTitle("APPEARANCE")
+                    settingsTitle(tr(vm.locale, .appearance).uppercased())
                     flatGroup {
                         flatRow(
                             icon: "globe",
@@ -91,15 +91,15 @@ struct SettingsView: View {
                     }
 
                     Spacer().frame(height: 8)
-                    settingsTitle("BACKEND TOOLS")
+                    settingsTitle(tr(vm.locale, .backendTools).uppercased())
                     flatGroup {
-                        flatRow(icon: "arrow.clockwise.circle.fill", iconBg: Color(red: 0.02, green: 0.55, blue: 0.34), label: "Sync support data", value: nil, onTap: { vm.preloadSupportData() })
+                        flatRow(icon: "arrow.clockwise.circle.fill", iconBg: Color(red: 0.02, green: 0.55, blue: 0.34), label: tr(vm.locale, .syncSupportData), value: nil, onTap: { vm.preloadSupportData() })
                         sectionDivider()
-                        flatRow(icon: "tag.fill", iconBg: Color(red: 0.40, green: 0.25, blue: 0.93), label: "Create / Update Tag", value: nil, onTap: { showTagDialog = true })
+                        flatRow(icon: "tag.fill", iconBg: Color(red: 0.40, green: 0.25, blue: 0.93), label: tr(vm.locale, .createUpdateTag), value: nil, onTap: { showTagDialog = true })
                         sectionDivider()
-                        flatRow(icon: "arrowshape.turn.up.left.fill", iconBg: Color(red: 0.01, green: 0.47, blue: 0.78), label: "Create / Update Reply", value: nil, onTap: { showReplyDialog = true })
+                        flatRow(icon: "arrowshape.turn.up.left.fill", iconBg: Color(red: 0.01, green: 0.47, blue: 0.78), label: tr(vm.locale, .createUpdateReply), value: nil, onTap: { showReplyDialog = true })
                         sectionDivider()
-                        flatRow(icon: "person.crop.circle.badge.plus", iconBg: Color(red: 0.96, green: 0.62, blue: 0.04), label: "Add Contact", value: nil, onTap: { showContactDialog = true })
+                        flatRow(icon: "person.crop.circle.badge.plus", iconBg: Color(red: 0.96, green: 0.62, blue: 0.04), label: tr(vm.locale, .addContactTitle), value: nil, onTap: { showContactDialog = true })
                     }
                     if let status = vm.actionStatus, !status.isEmpty {
                         Text(status)
@@ -111,7 +111,7 @@ struct SettingsView: View {
                     }
 
                     Spacer().frame(height: 8)
-                    settingsTitle("ABOUT")
+                    settingsTitle(tr(vm.locale, .about).uppercased())
                     flatGroup {
                         flatRow(icon: "shield.fill", iconBg: Color(red: 0.06, green: 0.73, blue: 0.51), label: tr(vm.locale, .privacyPolicy), value: nil, onTap: { vm.setScreen(.privacy) })
                         sectionDivider()
@@ -148,34 +148,34 @@ struct SettingsView: View {
             Text(tr(vm.locale, .logoutConfirm))
         }
         .confirmationDialog(tr(vm.locale, .language), isPresented: $showingLanguageDialog, titleVisibility: .visible) {
-            Button("English") { vm.locale = .en }
-            Button("العربية") { vm.locale = .ar }
+            Button(tr(vm.locale, .english)) { vm.locale = .en }
+            Button(tr(vm.locale, .arabic)) { vm.locale = .ar }
             Button(tr(vm.locale, .cancel), role: .cancel) {}
         }
-        .alert("Create / Update Tag", isPresented: $showTagDialog) {
-            TextField("Tag name", text: $tagName)
-            TextField("Tag color (#hex)", text: $tagColor)
-            TextField("Tag ID (optional)", text: $tagId)
-            Button("Cancel", role: .cancel) {}
-            Button("Save") {
+        .alert(tr(vm.locale, .createUpdateTag), isPresented: $showTagDialog) {
+            TextField(tr(vm.locale, .tagName), text: $tagName)
+            TextField(tr(vm.locale, .tagColorHex), text: $tagColor)
+            TextField(tr(vm.locale, .tagIdOptional), text: $tagId)
+            Button(tr(vm.locale, .cancel), role: .cancel) {}
+            Button(tr(vm.locale, .save)) {
                 vm.createOrUpdateTag(name: tagName, color: tagColor, tagId: Int(tagId))
             }
         }
-        .alert("Create / Update Reply", isPresented: $showReplyDialog) {
-            TextField("Reply name", text: $replyName)
-            TextField("Reply text", text: $replyText)
-            TextField("Reply ID (optional)", text: $replyId)
-            Button("Cancel", role: .cancel) {}
-            Button("Save") {
+        .alert(tr(vm.locale, .createUpdateReply), isPresented: $showReplyDialog) {
+            TextField(tr(vm.locale, .replyName), text: $replyName)
+            TextField(tr(vm.locale, .replyText), text: $replyText)
+            TextField(tr(vm.locale, .replyIdOptional), text: $replyId)
+            Button(tr(vm.locale, .cancel), role: .cancel) {}
+            Button(tr(vm.locale, .save)) {
                 vm.createOrUpdateReply(name: replyName, text: replyText, replyId: Int(replyId))
             }
         }
-        .alert("Add Contact", isPresented: $showContactDialog) {
-            TextField("Name", text: $contactName)
-            TextField("Phone", text: $contactPhone)
-            TextField("Email (optional)", text: $contactEmail)
-            Button("Cancel", role: .cancel) {}
-            Button("Add") {
+        .alert(tr(vm.locale, .addContactTitle), isPresented: $showContactDialog) {
+            TextField(tr(vm.locale, .nameLabel), text: $contactName)
+            TextField(tr(vm.locale, .phoneLabel), text: $contactPhone)
+            TextField(tr(vm.locale, .emailOptional), text: $contactEmail)
+            Button(tr(vm.locale, .cancel), role: .cancel) {}
+            Button(tr(vm.locale, .add)) {
                 vm.addContact(name: contactName, phone: contactPhone, email: contactEmail.isEmpty ? nil : contactEmail)
             }
         }

@@ -99,17 +99,17 @@ struct ChatView: View {
                     Button((currentConversation?.status ?? .open) == .open ? tr(vm.locale, .closeConversation) : tr(vm.locale, .reopenConversation)) {
                         vm.toggleConversationStatus()
                     }
-                    Button("Assign agent") { showAssignAgentDialog = true }
-                    Button("Unassign agent") { vm.unassignCurrentChat() }
-                    Button("Mute conversation") { vm.muteCurrentChat(true) }
-                    Button("Unmute conversation") { vm.muteCurrentChat(false) }
-                    Button("Mark as read") { vm.markCurrentChatRead(true) }
-                    Button("Mark as unread") { vm.markCurrentChatRead(false) }
-                    Button("Attach / detach tag") { showTagDialog = true }
-                    Button("Send template") { showTemplateDialog = true }
-                    Button("Send flow") { showFlowDialog = true }
-                    Button("Sync custom field") { showCustomFieldDialog = true }
-                    Button("Delete chat", role: .destructive) { showDeleteConfirm = true }
+                    Button(tr(vm.locale, .assignAgent)) { showAssignAgentDialog = true }
+                    Button(tr(vm.locale, .unassignAgent)) { vm.unassignCurrentChat() }
+                    Button(tr(vm.locale, .muteConversation)) { vm.muteCurrentChat(true) }
+                    Button(tr(vm.locale, .unmuteConversation)) { vm.muteCurrentChat(false) }
+                    Button(tr(vm.locale, .markAsRead)) { vm.markCurrentChatRead(true) }
+                    Button(tr(vm.locale, .markAsUnread)) { vm.markCurrentChatRead(false) }
+                    Button(tr(vm.locale, .attachDetachTag)) { showTagDialog = true }
+                    Button(tr(vm.locale, .sendTemplate)) { showTemplateDialog = true }
+                    Button(tr(vm.locale, .sendFlow)) { showFlowDialog = true }
+                    Button(tr(vm.locale, .syncCustomField)) { showCustomFieldDialog = true }
+                    Button(tr(vm.locale, .deleteChat), role: .destructive) { showDeleteConfirm = true }
                 } label: {
                     Image(systemName: "ellipsis.circle")
                         .font(.system(size: 20))
@@ -459,64 +459,64 @@ struct ChatView: View {
             audioRecorder = nil
             isRecordingVoice = false
         }
-        .alert("Assign agent", isPresented: $showAssignAgentDialog) {
-            TextField("Agent ID", text: $agentInput)
-            Button("Cancel", role: .cancel) {}
-            Button("Assign") {
+        .alert(tr(vm.locale, .assignAgentTitle), isPresented: $showAssignAgentDialog) {
+            TextField(tr(vm.locale, .agentId), text: $agentInput)
+            Button(tr(vm.locale, .cancel), role: .cancel) {}
+            Button(tr(vm.locale, .assignAgent)) {
                 if let value = Int(agentInput) { vm.assignCurrentChat(agentId: value) }
                 agentInput = ""
             }
         }
-        .alert("Attach / detach tag", isPresented: $showTagDialog) {
-            TextField("Tag ID", text: $tagInput)
-            Button("Cancel", role: .cancel) {}
-            Button("Attach") {
+        .alert(tr(vm.locale, .attachDetachTagTitle), isPresented: $showTagDialog) {
+            TextField(tr(vm.locale, .tagId), text: $tagInput)
+            Button(tr(vm.locale, .cancel), role: .cancel) {}
+            Button(tr(vm.locale, .attach)) {
                 if let value = Int(tagInput) { vm.attachTagToCurrentChat(tagId: value) }
                 tagInput = ""
             }
-            Button("Detach") {
+            Button(tr(vm.locale, .detach)) {
                 if let value = Int(tagInput) { vm.detachTagFromCurrentChat(tagId: value) }
                 tagInput = ""
             }
         }
-        .alert("Send template", isPresented: $showTemplateDialog) {
-            TextField("Template ID", text: $templateInput)
-            Button("Cancel", role: .cancel) {}
-            Button("Send") {
+        .alert(tr(vm.locale, .sendTemplateTitle), isPresented: $showTemplateDialog) {
+            TextField(tr(vm.locale, .templateId), text: $templateInput)
+            Button(tr(vm.locale, .cancel), role: .cancel) {}
+            Button(tr(vm.locale, .send)) {
                 if let value = Int(templateInput) { vm.sendTemplateToCurrentChat(templateId: value) }
                 templateInput = ""
             }
         }
-        .alert("Send flow", isPresented: $showFlowDialog) {
-            TextField("Flow ID", text: $flowInput)
-            Button("Cancel", role: .cancel) {}
-            Button("Send") {
+        .alert(tr(vm.locale, .sendFlowTitle), isPresented: $showFlowDialog) {
+            TextField(tr(vm.locale, .flowId), text: $flowInput)
+            Button(tr(vm.locale, .cancel), role: .cancel) {}
+            Button(tr(vm.locale, .send)) {
                 if let value = Int(flowInput) { vm.sendFlowToCurrentChat(flowId: value) }
                 flowInput = ""
             }
         }
-        .alert("Sync custom field", isPresented: $showCustomFieldDialog) {
-            TextField("Field ID", text: $customFieldId)
-            TextField("Field Value", text: $customFieldValue)
-            Button("Cancel", role: .cancel) {}
-            Button("Sync") {
+        .alert(tr(vm.locale, .syncCustomFieldTitle), isPresented: $showCustomFieldDialog) {
+            TextField(tr(vm.locale, .fieldId), text: $customFieldId)
+            TextField(tr(vm.locale, .fieldValue), text: $customFieldValue)
+            Button(tr(vm.locale, .cancel), role: .cancel) {}
+            Button(tr(vm.locale, .sync)) {
                 vm.syncCurrentContactCustomField(fieldId: customFieldId, fieldValue: customFieldValue)
                 customFieldId = ""
                 customFieldValue = ""
             }
         }
-        .alert("Delete chat?", isPresented: $showDeleteConfirm) {
-            Button("Cancel", role: .cancel) {}
-            Button("Delete", role: .destructive) {
+        .alert(tr(vm.locale, .deleteChatQuestion), isPresented: $showDeleteConfirm) {
+            Button(tr(vm.locale, .cancel), role: .cancel) {}
+            Button(tr(vm.locale, .delete), role: .destructive) {
                 vm.deleteCurrentChat()
             }
         } message: {
-            Text("This calls delete chat endpoint for this contact.")
+            Text(tr(vm.locale, .deleteChatEndpointHint))
         }
-        .alert("Call unavailable", isPresented: $showCallUnavailableAlert) {
-            Button("OK", role: .cancel) {}
+        .alert(tr(vm.locale, .callUnavailable), isPresented: $showCallUnavailableAlert) {
+            Button(tr(vm.locale, .ok), role: .cancel) {}
         } message: {
-            Text("Phone number is unavailable for this contact.")
+            Text(tr(vm.locale, .callUnavailableMessage))
         }
     }
 
@@ -713,114 +713,126 @@ private struct ContactInfoSheet: View {
         mediaLinksDocsItems.count
     }
 
+    private var isConversationOpen: Bool {
+        (conversation?.status ?? .open) == .open
+    }
+
     private var mediaLinksDocsItems: [MediaLinksDocsItem] {
         messages.compactMap { message in
             let kind = (message.mediaKind ?? "").lowercased()
             if kind == "image", let url = sanitizeRemoteURL(message.mediaUrl) {
-                return MediaLinksDocsItem(type: "Photo", url: url, category: .media, previewKind: "image")
+                return MediaLinksDocsItem(type: tr(vm.locale, .photo), url: url, category: .media, previewKind: "image")
             }
             if kind == "video", let url = sanitizeRemoteURL(message.mediaUrl) {
-                return MediaLinksDocsItem(type: "Video", url: url, category: .media, previewKind: "video")
+                return MediaLinksDocsItem(type: tr(vm.locale, .video), url: url, category: .media, previewKind: "video")
             }
             if kind == "audio", let url = sanitizeRemoteURL(message.mediaUrl) {
-                return MediaLinksDocsItem(type: "Audio", url: url, category: .media, previewKind: "audio", isAvailable: true)
+                return MediaLinksDocsItem(type: tr(vm.locale, .audio), url: url, category: .media, previewKind: "audio", isAvailable: true)
             }
             if kind == "audio" {
-                return MediaLinksDocsItem(type: "Audio", url: "", category: .media, previewKind: "audio", isAvailable: false)
+                return MediaLinksDocsItem(type: tr(vm.locale, .audio), url: "", category: .media, previewKind: "audio", isAvailable: false)
             }
             if kind == "document", let url = sanitizeRemoteURL(message.mediaUrl) {
-                return MediaLinksDocsItem(type: "Document", url: url, category: .docs, previewKind: "document")
+                return MediaLinksDocsItem(type: tr(vm.locale, .document), url: url, category: .docs, previewKind: "document")
             }
             if let link = firstURL(in: message.content) {
-                return MediaLinksDocsItem(type: "Link", url: link, category: .links, previewKind: "link")
+                return MediaLinksDocsItem(type: tr(vm.locale, .link), url: link, category: .links, previewKind: "link")
             }
             return nil
         }
     }
 
     var body: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 0) {
             HStack {
-                Text("Contact info")
-                    .font(.system(size: 22, weight: .bold))
+                Text(tr(vm.locale, .contactInfo))
+                    .font(.system(size: 20, weight: .bold))
                     .foregroundStyle(AppPalette.textPrimary)
                 Spacer()
                 Button(tr(vm.locale, .cancel)) { dismiss() }
+                    .font(.system(size: 16, weight: .medium))
                     .foregroundStyle(AppPalette.primary)
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
+            .padding(.bottom, 8)
 
-            Circle()
-                .fill(AppPalette.primary.opacity(0.14))
-                .frame(width: 82, height: 82)
-                .overlay(
-                    Text(String((conversation?.customerName.first ?? "C")).uppercased())
-                        .font(.system(size: 28, weight: .bold))
-                        .foregroundStyle(AppPalette.primary)
-                )
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 16) {
+                    VStack(spacing: 8) {
+                        Circle()
+                            .fill(AppPalette.primary.opacity(0.14))
+                            .frame(width: 86, height: 86)
+                            .overlay(
+                                Text(String((conversation?.customerName.first ?? "C")).uppercased())
+                                    .font(.system(size: 30, weight: .bold))
+                                    .foregroundStyle(AppPalette.primary)
+                            )
 
-            Text(conversation?.customerName ?? "Contact")
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(AppPalette.textPrimary)
+                        Text(conversation?.customerName ?? "Contact")
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(AppPalette.textPrimary)
 
-            Text(((conversation?.customerPhone ?? "").isEmpty ? "-" : (conversation?.customerPhone ?? "-")))
-                .font(.system(size: 15))
-                .foregroundStyle(AppPalette.textMuted)
+                        Text(((conversation?.customerPhone ?? "").isEmpty ? "-" : (conversation?.customerPhone ?? "-")))
+                            .font(.system(size: 15))
+                            .foregroundStyle(AppPalette.textMuted)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 6)
 
-            VStack(spacing: 8) {
-                infoRow(
-                    label: "Status",
-                    value: (conversation?.status ?? .open) == .open ? tr(vm.locale, .open) : tr(vm.locale, .closed)
-                )
-                infoRow(
-                    label: "Presence",
-                    value: (conversation?.isOnline ?? false) ? tr(vm.locale, .online) : tr(vm.locale, .lastSeen)
-                )
-                Button {
-                    showMediaLinksDocsSheet = true
-                } label: {
-                    infoRow(label: "Media, links and docs", value: "\(mediaLinksDocsCount)")
+                    VStack(spacing: 0) {
+                        infoRow(
+                            label: tr(vm.locale, .status),
+                            value: isConversationOpen ? tr(vm.locale, .open) : tr(vm.locale, .closed)
+                        )
+                        Divider().overlay(AppPalette.border.opacity(0.45))
+                        infoRow(
+                            label: tr(vm.locale, .presence),
+                            value: (conversation?.isOnline ?? false) ? tr(vm.locale, .online) : tr(vm.locale, .lastSeen)
+                        )
+                        Divider().overlay(AppPalette.border.opacity(0.45))
+                        Button {
+                            showMediaLinksDocsSheet = true
+                        } label: {
+                            infoRow(label: tr(vm.locale, .mediaLinksDocs), value: "\(mediaLinksDocsCount)")
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .background(AppPalette.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+
+                    HStack(spacing: 10) {
+                        actionButton(tr(vm.locale, .mute), tint: AppPalette.primary, fill: false) {
+                            onMute()
+                        }
+                        actionButton(tr(vm.locale, .unmute), tint: AppPalette.primary, fill: false) {
+                            onUnmute()
+                        }
+                    }
+
+                    HStack(spacing: 10) {
+                        actionButton(
+                            isConversationOpen ? tr(vm.locale, .closeConversation) : tr(vm.locale, .reopenConversation),
+                            tint: AppPalette.primary,
+                            fill: true
+                        ) {
+                            onToggleStatus()
+                        }
+                        actionButton(tr(vm.locale, .delete), tint: .red, fill: false) {
+                            onDeleteChat()
+                            dismiss()
+                        }
+                    }
                 }
-                .buttonStyle(.plain)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 18)
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 4)
-
-            HStack(spacing: 10) {
-                Button("Mute") {
-                    onMute()
-                }
-                .buttonStyle(.bordered)
-                .tint(AppPalette.primary)
-
-                Button("Unmute") {
-                    onUnmute()
-                }
-                .buttonStyle(.bordered)
-                .tint(AppPalette.primary)
-            }
-
-            HStack(spacing: 10) {
-                Button((conversation?.status ?? .open) == .open ? "Close chat" : "Reopen chat") {
-                    onToggleStatus()
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(AppPalette.primary)
-
-                Button("Delete", role: .destructive) {
-                    onDeleteChat()
-                    dismiss()
-                }
-                .buttonStyle(.bordered)
-            }
-
-            Spacer()
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
         .background(AppPalette.background.ignoresSafeArea())
         .sheet(isPresented: $showMediaLinksDocsSheet) {
-            MediaLinksDocsSheet(items: mediaLinksDocsItems)
+            MediaLinksDocsSheet(items: mediaLinksDocsItems, locale: vm.locale)
         }
     }
 
@@ -837,8 +849,16 @@ private struct ContactInfoSheet: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(AppPalette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    @ViewBuilder
+    private func actionButton(_ title: String, tint: Color, fill: Bool, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .font(.system(size: 16, weight: .semibold))
+            .foregroundStyle(fill ? Color.white : tint)
+            .frame(maxWidth: .infinity, minHeight: 42)
+            .background(fill ? tint : tint.opacity(0.12))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }
 
@@ -867,6 +887,7 @@ private enum MediaLinksDocsCategory: String {
 
 private struct MediaLinksDocsSheet: View {
     let items: [MediaLinksDocsItem]
+    let locale: AppLocale
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @Environment(\.colorScheme) private var colorScheme
@@ -890,27 +911,27 @@ private struct MediaLinksDocsSheet: View {
     var body: some View {
         VStack(spacing: 12) {
             HStack {
-                Text("Media, links and docs")
+                Text(tr(locale, .mediaLinksDocsTitle))
                     .font(.system(size: 22, weight: .bold))
                     .foregroundStyle(AppPalette.textPrimary)
                 Spacer()
-                Button("Close") { dismiss() }
+                Button(tr(locale, .close)) { dismiss() }
                     .foregroundStyle(AppPalette.primary)
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
 
             HStack(spacing: 8) {
-                tabChip(label: "Media (\(mediaCount))", tab: .media)
-                tabChip(label: "Docs (\(docsCount))", tab: .docs)
-                tabChip(label: "Links (\(linksCount))", tab: .links)
+                tabChip(label: "\(tr(locale, .mediaTab)) (\(mediaCount))", tab: .media)
+                tabChip(label: "\(tr(locale, .docsTab)) (\(docsCount))", tab: .docs)
+                tabChip(label: "\(tr(locale, .linksTab)) (\(linksCount))", tab: .links)
                 Spacer()
             }
             .padding(.horizontal, 16)
 
             if filteredItems.isEmpty {
                 Spacer()
-                Text("No items in this tab.")
+                Text(tr(locale, .noItemsInTab))
                     .font(.system(size: 14))
                     .foregroundStyle(AppPalette.textMuted)
                 Spacer()
@@ -929,12 +950,12 @@ private struct MediaLinksDocsSheet: View {
                                             Text(item.type)
                                                 .font(.system(size: 14, weight: .semibold))
                                                 .foregroundStyle(AppPalette.primary)
-                                            Text(item.url.isEmpty ? "No URL from backend" : item.url)
+                                            Text(item.url.isEmpty ? tr(locale, .noUrlFromBackend) : item.url)
                                                 .font(.system(size: 12))
                                                 .foregroundStyle(AppPalette.textMuted)
                                                 .lineLimit(1)
                                             if !item.isAvailable {
-                                                Text("Unavailable")
+                                                Text(tr(locale, .unavailable))
                                                     .font(.system(size: 11, weight: .medium))
                                                     .foregroundStyle(AppPalette.textMuted)
                                             }
@@ -994,10 +1015,10 @@ private struct MediaLinksDocsSheet: View {
         .sheet(isPresented: $showAudioPreview) {
             VStack(spacing: 10) {
                 HStack {
-                    Text("Audio")
+                    Text(tr(locale, .audio))
                         .font(.system(size: 20, weight: .bold))
                     Spacer()
-                    Button("Close") { showAudioPreview = false }
+                    Button(tr(locale, .close)) { showAudioPreview = false }
                         .foregroundStyle(AppPalette.primary)
                 }
                 .padding(.horizontal, 16)
@@ -1007,7 +1028,7 @@ private struct MediaLinksDocsSheet: View {
                     InlineAudioMessageView(audioURL: url, darkMode: colorScheme == .dark)
                         .padding(.horizontal, 16)
                 } else {
-                    Text("Unable to load audio.")
+                    Text(tr(locale, .unableToLoadAudio))
                         .foregroundStyle(AppPalette.textMuted)
                         .padding()
                 }

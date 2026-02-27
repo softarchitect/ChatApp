@@ -3,16 +3,18 @@ import SwiftUI
 struct MessageBubble: View {
     let message: ChatMessage
     let darkMode: Bool
+    @Environment(\.layoutDirection) private var layoutDirection
 
     var isAgent: Bool { message.sender == .agent }
+    private var locale: AppLocale { layoutDirection == .rightToLeft ? .ar : .en }
 
     var body: some View {
         VStack(alignment: isAgent ? .trailing : .leading, spacing: 4) {
             if message.type == .note {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("INTERNAL NOTE").font(.system(size: 10, weight: .bold)).foregroundStyle(Color.orange)
+                    Text(tr(locale, .internalNoteBadge)).font(.system(size: 10, weight: .bold)).foregroundStyle(Color.orange)
                     Text(message.content).font(.system(size: 14)).foregroundStyle(darkMode ? Color(red: 0.96, green: 0.91, blue: 0.65) : Color(red: 0.53, green: 0.33, blue: 0.08))
-                    Text("\(message.noteAuthor ?? "You") • \(message.timestamp)").font(.system(size: 11)).foregroundStyle(AppPalette.textMuted)
+                    Text("\(message.noteAuthor ?? tr(locale, .youLabel)) • \(message.timestamp)").font(.system(size: 11)).foregroundStyle(AppPalette.textMuted)
                 }
                 .padding(10)
                 .background(Color.orange.opacity(darkMode ? 0.25 : 0.16))
