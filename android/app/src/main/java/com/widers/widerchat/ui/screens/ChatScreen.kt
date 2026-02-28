@@ -169,7 +169,9 @@ fun ChatScreen(
         lastMessageTime = "",
         unreadCount = 0,
         status = ConversationStatus.OPEN,
-        isOnline = false
+        isOnline = false,
+        assignedAgentName = null,
+        tags = emptyList()
     )
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()

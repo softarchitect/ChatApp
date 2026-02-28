@@ -47,7 +47,23 @@ data class Conversation(
     val lastMessageTime: String,
     val unreadCount: Int,
     val status: ConversationStatus,
-    val isOnline: Boolean
+    val isOnline: Boolean,
+    val assignedAgentName: String? = null,
+    val tags: List<ConversationTag> = emptyList()
+)
+
+data class ConversationTag(
+    val id: Long,
+    val name: String,
+    val colorHex: String,
+    val attachedAt: String? = null,
+    val repeatedAt: List<String> = emptyList()
+)
+
+data class AvailableTag(
+    val id: Long,
+    val name: String,
+    val colorHex: String = "#64748B"
 )
 
 data class ChatMessage(

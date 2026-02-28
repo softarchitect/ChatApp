@@ -9,6 +9,7 @@ enum ConversationMapper {
         let unreadCount = item.firstInt(keys: ["unread_count", "unread"]) ?? 0
         let status = (item.firstString(keys: ["status"])?.lowercased() == "closed") ? ConversationStatus.closed : .open
         let isOnline = item.firstBool(keys: ["online", "is_online"]) ?? false
+        let assignedAgentName = (item["agent"] as? [String: Any])?.firstString(keys: ["name", "full_name", "username"])
 
         return Conversation(
             id: id,
@@ -18,7 +19,9 @@ enum ConversationMapper {
             lastMessageTime: item.firstString(keys: ["last_message_time", "updated_at", "time"]) ?? "",
             unreadCount: unreadCount,
             status: status,
-            isOnline: isOnline
+            isOnline: isOnline,
+            assignedAgentName: assignedAgentName,
+            tags: []
         )
     }
 }

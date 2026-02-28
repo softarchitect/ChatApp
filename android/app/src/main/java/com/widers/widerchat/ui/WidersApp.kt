@@ -130,12 +130,19 @@ fun WidersApp(viewModel: AppViewModel = viewModel()) {
                         conversations = state.conversations,
                         contacts = state.newConversationContacts,
                         contactsLoading = state.contactsLoading,
+                        availableTags = state.availableTags,
                         onOpenChat = viewModel::openChat,
                         onSearchChats = viewModel::searchChats,
                         onLoadContacts = viewModel::loadContactsForNewConversation,
                         onSearchContacts = viewModel::searchContactsForNewConversation,
                         onStartConversationForContact = viewModel::startConversationForContact,
                         onStartNewConversation = viewModel::startNewConversation,
+                        onAttachTagQuick = viewModel::attachTagToConversation,
+                        onDetachTagQuick = viewModel::detachTagFromConversation,
+                        onRepeatTagQuick = viewModel::repeatTagOnConversation,
+                        onMarkReadQuick = viewModel::markConversationRead,
+                        onToggleStatusQuick = viewModel::toggleConversationStatusById,
+                        onDeleteConversationsQuick = viewModel::deleteConversationsByIds,
                         actionStatus = state.actionStatus
                     )
 

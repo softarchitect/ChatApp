@@ -5,10 +5,12 @@ import com.widers.widerchat.data.remote.SessionContext
 import com.widers.widerchat.data.remote.WidersApiService
 import com.widers.widerchat.domain.model.ChatMessage
 import com.widers.widerchat.domain.model.Conversation
+import com.widers.widerchat.domain.model.ConversationTag
 import com.widers.widerchat.domain.model.ConversationStatus
 import com.widers.widerchat.domain.model.MessageDeliveryStatus
 import com.widers.widerchat.domain.model.MessageSender
 import com.widers.widerchat.domain.model.MessageType
+import com.widers.widerchat.domain.model.AvailableTag
 import com.widers.widerchat.domain.repository.ChatRepository
 import org.json.JSONArray
 import org.json.JSONObject
@@ -96,6 +98,9 @@ class NetworkChatRepository(
                 val isOpen = statusObj?.firstBoolean("is_open")
                     ?: item.firstBoolean("open", "is_open")
                     ?: (item.firstString("status") != "closed")
+                val agentName = item.optJSONObject("agent")
+                    ?.firstString("name", "full_name", "username")
+                val tags = parseConversationTags(item)
 
                 add(
                     Conversation(
@@ -106,7 +111,9 @@ class NetworkChatRepository(
                         lastMessageTime = lastMessageTime,
                         unreadCount = unreadCount,
                         status = if (isOpen) ConversationStatus.OPEN else ConversationStatus.CLOSED,
-                        isOnline = item.firstBoolean("is_online", "online") ?: false
+                        isOnline = item.firstBoolean("is_online", "online") ?: false,
+                        assignedAgentName = agentName,
+                        tags = tags
                     )
                 )
             }
@@ -261,6 +268,20 @@ class NetworkChatRepository(
     }
     suspend fun getTemplates() = session?.let(api::getTemplatesList)
     suspend fun getTags() = session?.let(api::getTagsList)
+    suspend fun listAvailableTags(): List<AvailableTag> {
+        val response = getTags() ?: return emptyList()
+        val items = response.firstArray("tags", "data", "rows", "result") ?: return emptyList()
+        return buildList {
+            for (i in 0 until items.length()) {
+                val item = items.optJSONObject(i) ?: continue
+                val id = item.firstLong("id", "tag_id") ?: continue
+                val name = item.firstString("name", "title")?.trim().orEmpty()
+                if (name.isBlank()) continue
+                val color = item.firstString("color", "hex", "tag_color").orEmpty().ifBlank { "#64748B" }
+                add(AvailableTag(id = id, name = name, colorHex = color))
+            }
+        }
+    }
     suspend fun getReplies() = session?.let(api::getRepliesList)
     suspend fun getFlows() = session?.let(api::getFlowsList)
     suspend fun getAgents() = session?.let(api::getAgentsList)
@@ -294,6 +315,42 @@ class NetworkChatRepository(
     }
 
     fun currentUserSnapshot(): Pair<String?, String?> = sessionUserName to sessionUserEmail
+}
+
+private fun parseConversationTags(item: JSONObject): List<ConversationTag> {
+    val withDuplicates = item.optJSONArray("tags_with_duplicates")
+    val fallback = item.optJSONArray("chats_tags")
+    val source = withDuplicates ?: fallback ?: return emptyList()
+    return buildList {
+        for (i in 0 until source.length()) {
+            val tag = source.optJSONObject(i) ?: continue
+            val id = tag.firstLong("id", "chats_tag_id", "tag_id") ?: continue
+            val name = tag.firstString("name", "title")?.trim().orEmpty()
+            if (name.isBlank()) continue
+            val colorHex = tag.firstString("color", "hex").orEmpty().ifBlank { "#64748B" }
+            val attachedAtRaw = tag.optJSONObject("pivot")?.firstString("created_at")
+                ?: tag.firstString("created_at")
+            val repeated = tag.optJSONArray("duplicates")
+            val repeatedAt = buildList {
+                if (repeated != null) {
+                    for (r in 0 until repeated.length()) {
+                        val d = repeated.optJSONObject(r) ?: continue
+                        val at = d.firstString("created_at", "updated_at") ?: continue
+                        add(at)
+                    }
+                }
+            }
+            add(
+                ConversationTag(
+                    id = id,
+                    name = name,
+                    colorHex = colorHex,
+                    attachedAt = attachedAtRaw,
+                    repeatedAt = repeatedAt
+                )
+            )
+        }
+    }.distinctBy { it.id }
 }
 
 private fun JSONObject.firstObject(vararg keys: String): JSONObject? {

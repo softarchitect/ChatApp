@@ -9,14 +9,14 @@ import com.widers.widerchat.domain.model.MessageType
 
 object MockSeed {
     val conversations = listOf(
-        Conversation("1", "Ahmed Al-Hassan", "+966 50 123 4567", "I need help with my order #4521", "2m", 3, ConversationStatus.OPEN, true),
-        Conversation("2", "Sarah Johnson", "+1 555 234 5678", "Thank you for the quick response!", "15m", 0, ConversationStatus.OPEN, true),
-        Conversation("3", "Mohammed Ali", "+971 55 987 6543", "When will my package arrive?", "1h", 1, ConversationStatus.OPEN, false),
-        Conversation("4", "Fatima Zahra", "+212 6 12 34 56 78", "I would like to return this item", "2h", 0, ConversationStatus.OPEN, false),
-        Conversation("5", "Omar Khalid", "+966 55 432 1098", "Do you have this in size L?", "3h", 2, ConversationStatus.OPEN, true),
-        Conversation("6", "Layla Nasser", "+974 33 456 789", "Perfect, I will place the order now", "5h", 0, ConversationStatus.CLOSED, false),
-        Conversation("7", "James Wilson", "+44 7911 123456", "Is the promotion still available?", "1d", 0, ConversationStatus.CLOSED, false),
-        Conversation("8", "Nour El-Din", "+20 10 1234 5678", "Thanks for your help!", "1d", 0, ConversationStatus.CLOSED, false)
+        Conversation("1", "Ahmed Al-Hassan", "+966 50 123 4567", "I need help with my order #4521", "2m", 3, ConversationStatus.OPEN, true, null, emptyList()),
+        Conversation("2", "Sarah Johnson", "+1 555 234 5678", "Thank you for the quick response!", "15m", 0, ConversationStatus.OPEN, true, null, emptyList()),
+        Conversation("3", "Mohammed Ali", "+971 55 987 6543", "When will my package arrive?", "1h", 1, ConversationStatus.OPEN, false, null, emptyList()),
+        Conversation("4", "Fatima Zahra", "+212 6 12 34 56 78", "I would like to return this item", "2h", 0, ConversationStatus.OPEN, false, null, emptyList()),
+        Conversation("5", "Omar Khalid", "+966 55 432 1098", "Do you have this in size L?", "3h", 2, ConversationStatus.OPEN, true, null, emptyList()),
+        Conversation("6", "Layla Nasser", "+974 33 456 789", "Perfect, I will place the order now", "5h", 0, ConversationStatus.CLOSED, false, null, emptyList()),
+        Conversation("7", "James Wilson", "+44 7911 123456", "Is the promotion still available?", "1d", 0, ConversationStatus.CLOSED, false, null, emptyList()),
+        Conversation("8", "Nour El-Din", "+20 10 1234 5678", "Thanks for your help!", "1d", 0, ConversationStatus.CLOSED, false, null, emptyList())
     )
 
     val messages: Map<String, List<ChatMessage>> = mapOf(

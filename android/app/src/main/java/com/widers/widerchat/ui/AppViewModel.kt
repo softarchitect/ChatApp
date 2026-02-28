@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.widers.widerchat.data.repository.NetworkChatRepository
 import com.widers.widerchat.domain.model.AppLocale
 import com.widers.widerchat.domain.model.AppScreen
+import com.widers.widerchat.domain.model.AvailableTag
 import com.widers.widerchat.domain.model.ChatMessage
 import com.widers.widerchat.domain.model.Conversation
 import com.widers.widerchat.domain.model.ConversationStatus
@@ -34,6 +35,7 @@ data class AppUiState(
     val isChatLoading: Boolean = false,
     val profileName: String = "",
     val profileEmail: String = "",
+    val availableTags: List<AvailableTag> = emptyList(),
     val screen: AppScreen = AppScreen.LOGIN,
     val activeChatId: String? = null,
     val conversations: List<Conversation> = emptyList(),
@@ -78,6 +80,7 @@ class AppViewModel(
                     profileName = profileName.orEmpty(),
                     profileEmail = profileEmail.orEmpty()
                 )
+                refreshAvailableTags()
             } catch (_: Exception) {
                 _uiState.value = _uiState.value.copy(isLoading = false, loginError = true)
             }
@@ -107,6 +110,7 @@ class AppViewModel(
                     profileName = profileName.orEmpty().ifBlank { fallbackProfileName.trim() },
                     profileEmail = profileEmail.orEmpty().ifBlank { fallbackProfileEmail.trim() }
                 )
+                refreshAvailableTags()
             } catch (_: Exception) {
                 _uiState.value = _uiState.value.copy(isLoading = false, isLoggedIn = false, loginError = true)
             }
@@ -172,7 +176,9 @@ class AppViewModel(
                         lastMessageTime = "",
                         unreadCount = 0,
                         status = ConversationStatus.OPEN,
-                        isOnline = false
+                        isOnline = false,
+                        assignedAgentName = null,
+                        tags = emptyList()
                     )
                     conversations + fallback
                 }
@@ -305,6 +311,31 @@ class AppViewModel(
         }
     }
 
+    fun toggleConversationStatusById(conversationId: String) {
+        val convo = _uiState.value.conversations.firstOrNull { it.id == conversationId } ?: return
+        val newStatus = if (convo.status == ConversationStatus.OPEN) {
+            ConversationStatus.CLOSED
+        } else {
+            ConversationStatus.OPEN
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            runAction {
+                repository.updateConversationStatus(conversationId, newStatus)
+                val conversations = repository.getConversations()
+                val activeMessages = if (_uiState.value.activeChatId == conversationId) {
+                    repository.getMessages(conversationId)
+                } else {
+                    _uiState.value.activeMessages
+                }
+                _uiState.value = _uiState.value.copy(
+                    conversations = conversations,
+                    activeMessages = activeMessages,
+                    actionStatus = if (newStatus == ConversationStatus.OPEN) "Conversation reopened" else "Conversation closed"
+                )
+            }
+        }
+    }
+
     fun assignCurrentChat(agentId: Long) {
         val contactId = _uiState.value.activeChatId?.toLongOrNull() ?: return
         viewModelScope.launch(Dispatchers.IO) {
@@ -414,6 +445,27 @@ class AppViewModel(
         }
     }
 
+    fun deleteConversationsByIds(conversationIds: List<String>) {
+        val ids = conversationIds.mapNotNull { it.toLongOrNull() }.distinct()
+        if (ids.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            runAction {
+                val repo = networkRepo() ?: return@runAction
+                ids.forEach { repo.deleteChat(it) }
+                val conversations = repository.getConversations()
+                val activeId = _uiState.value.activeChatId
+                val activeCleared = if (activeId != null && conversationIds.contains(activeId)) null else activeId
+                _uiState.value = _uiState.value.copy(
+                    conversations = conversations,
+                    activeChatId = activeCleared,
+                    activeMessages = if (activeCleared == null) emptyList() else _uiState.value.activeMessages,
+                    screen = if (activeCleared == null) AppScreen.CONVERSATIONS else _uiState.value.screen,
+                    actionStatus = "Conversations removed"
+                )
+            }
+        }
+    }
+
     fun preloadSupportData() {
         viewModelScope.launch(Dispatchers.IO) {
             runAction {
@@ -424,6 +476,7 @@ class AppViewModel(
                 repo.getReplies()
                 repo.getFlows()
                 repo.getAgents()
+                refreshAvailableTags()
                 setActionStatus("Support data synced")
             }
         }
@@ -578,7 +631,9 @@ class AppViewModel(
                 lastMessageTime = "",
                 unreadCount = 0,
                 status = ConversationStatus.OPEN,
-                isOnline = false
+                isOnline = false,
+                assignedAgentName = null,
+                tags = emptyList()
             )
             _uiState.value = _uiState.value.copy(
                 conversations = (conversations + synthetic).distinctBy { it.id }
@@ -601,6 +656,52 @@ class AppViewModel(
 
     fun clearActionStatus() {
         _uiState.value = _uiState.value.copy(actionStatus = null)
+    }
+
+    fun attachTagToConversation(conversationId: String, tagId: Long) {
+        val contactId = conversationId.toLongOrNull() ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            runAction {
+                networkRepo()?.attachTag(contactId, tagId)
+                val conversations = repository.getConversations()
+                _uiState.value = _uiState.value.copy(
+                    conversations = conversations,
+                    actionStatus = "Tag attached"
+                )
+            }
+        }
+    }
+
+    fun detachTagFromConversation(conversationId: String, tagId: Long) {
+        val contactId = conversationId.toLongOrNull() ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            runAction {
+                networkRepo()?.detachTag(contactId, tagId)
+                val conversations = repository.getConversations()
+                _uiState.value = _uiState.value.copy(
+                    conversations = conversations,
+                    actionStatus = "Tag detached"
+                )
+            }
+        }
+    }
+
+    fun repeatTagOnConversation(conversationId: String, tagId: Long) {
+        attachTagToConversation(conversationId, tagId)
+    }
+
+    fun markConversationRead(conversationId: String, read: Boolean) {
+        val contactId = conversationId.toLongOrNull() ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            runAction {
+                networkRepo()?.updateRead(contactId, read)
+                val conversations = repository.getConversations()
+                _uiState.value = _uiState.value.copy(
+                    conversations = conversations,
+                    actionStatus = if (read) "Marked as read" else "Marked as unread"
+                )
+            }
+        }
     }
 
     private fun parseNewConversationContacts(payload: JSONObject?): List<NewConversationContact> {
@@ -645,6 +746,13 @@ class AppViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             val conversations = repository.getConversations()
             _uiState.value = _uiState.value.copy(conversations = conversations)
+        }
+    }
+
+    private suspend fun refreshAvailableTags() {
+        val tags = networkRepo()?.listAvailableTags().orEmpty()
+        if (tags.isNotEmpty()) {
+            _uiState.value = _uiState.value.copy(availableTags = tags)
         }
     }
 

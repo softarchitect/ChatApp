@@ -9,4 +9,6 @@ struct Conversation: Identifiable {
     var unreadCount: Int
     var status: ConversationStatus
     let isOnline: Bool
+    let assignedAgentName: String? = nil
+    let tags: [ConversationTag] = []
 }

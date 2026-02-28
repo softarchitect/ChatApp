@@ -61,6 +61,7 @@ final class AppViewModel: ObservableObject {
     @Published var contactsLoading = false
     @Published var isChatLoading = false
     @Published var newConversationContacts: [NewConversationContact] = []
+    @Published var availableTags: [AvailableTag] = []
     @Published var profileName = ""
     @Published var profileEmail = ""
     private var localOutgoingByConversation: [String: [ChatMessage]] = [:]
@@ -95,6 +96,7 @@ final class AppViewModel: ObservableObject {
             }
             let loaded = await repository.getConversations()
             conversations = loaded
+            await refreshAvailableTags()
             let profile = repository.currentUserSnapshot()
             profileName = profile.name ?? ""
             profileEmail = profile.email ?? ""
@@ -315,6 +317,74 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    func markConversationRead(conversationId: String, read: Bool) {
+        guard let contactId = Int(conversationId) else { return }
+        Task { @MainActor in
+            isActionLoading = true
+            let result = await repository.updateRead(contactId: contactId, status: read)
+            isActionLoading = false
+            guard result != nil else {
+                actionStatus = "Failed: unable to update read status"
+                return
+            }
+            conversations = await repository.getConversations()
+            actionStatus = read ? "Marked as read" : "Marked as unread"
+        }
+    }
+
+    func toggleConversationStatus(conversationId: String) {
+        guard let current = conversations.first(where: { $0.id == conversationId }) else { return }
+        let open = current.status != .open
+        Task { @MainActor in
+            isActionLoading = true
+            let ok = await repository.updateConversationStatus(conversationId: conversationId, open: open)
+            isActionLoading = false
+            guard ok else {
+                actionStatus = "Failed: unable to update conversation status"
+                return
+            }
+            conversations = await repository.getConversations()
+            if activeChatId == conversationId {
+                activeMessages = await repository.getMessages(conversationId: conversationId)
+            }
+            actionStatus = open ? "Conversation reopened" : "Conversation closed"
+        }
+    }
+
+    func attachTag(conversationId: String, tagId: Int) {
+        guard let contactId = Int(conversationId) else { return }
+        Task { @MainActor in
+            isActionLoading = true
+            let result = await repository.attachTag(contactId: contactId, tagId: tagId)
+            isActionLoading = false
+            guard result != nil else {
+                actionStatus = "Failed: unable to attach tag"
+                return
+            }
+            conversations = await repository.getConversations()
+            actionStatus = "Tag attached"
+        }
+    }
+
+    func detachTag(conversationId: String, tagId: Int) {
+        guard let contactId = Int(conversationId) else { return }
+        Task { @MainActor in
+            isActionLoading = true
+            let result = await repository.detachTag(contactId: contactId, tagId: tagId)
+            isActionLoading = false
+            guard result != nil else {
+                actionStatus = "Failed: unable to detach tag"
+                return
+            }
+            conversations = await repository.getConversations()
+            actionStatus = "Tag detached"
+        }
+    }
+
+    func repeatTag(conversationId: String, tagId: Int) {
+        attachTag(conversationId: conversationId, tagId: tagId)
+    }
+
     func attachTagToCurrentChat(tagId: Int) {
         guard let id = activeChatId, let contactId = Int(id) else { return }
         Task { @MainActor in
@@ -383,6 +453,27 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    func deleteConversations(ids: [String]) {
+        let contactIds = Array(Set(ids.compactMap(Int.init)))
+        guard !contactIds.isEmpty else { return }
+        Task { @MainActor in
+            isActionLoading = true
+            var deleted = 0
+            for contactId in contactIds {
+                let result = await repository.deleteChat(contactId: contactId)
+                if result != nil { deleted += 1 }
+            }
+            isActionLoading = false
+            conversations = await repository.getConversations()
+            if let active = activeChatId, ids.contains(active) {
+                activeChatId = nil
+                activeMessages = []
+                screen = .conversations
+            }
+            actionStatus = deleted > 0 ? "Conversations removed" : "Failed: unable to remove conversations"
+        }
+    }
+
     func preloadSupportData() {
         Task { @MainActor in
             isActionLoading = true
@@ -392,6 +483,7 @@ final class AppViewModel: ObservableObject {
             let c4 = await repository.getRepliesList()
             let c5 = await repository.getFlowsList()
             let c6 = await repository.getAgentsList()
+            availableTags = c3.map(parseAvailableTags) ?? []
             isActionLoading = false
             let allOk = [c1, c2, c3, c4, c5, c6].allSatisfy { $0 != nil }
             actionStatus = allOk ? "Support data synced" : "Failed: support data sync incomplete"
@@ -584,6 +676,28 @@ final class AppViewModel: ObservableObject {
         return ["966500000001", "966500000002", "0500000003"].contains(digits)
     }
 
+    func refreshAvailableTags() async {
+        guard let payload = await repository.getTagsList() else {
+            availableTags = []
+            return
+        }
+        availableTags = parseAvailableTags(payload)
+    }
+
+    private func parseAvailableTags(_ payload: [String: Any]) -> [AvailableTag] {
+        let rows = payload.firstArray(keys: ["tags", "data", "rows", "result"])
+        var seen = Set<Int>()
+        let parsed: [AvailableTag] = rows.compactMap { item in
+            guard let id = item.firstInt(keys: ["id", "tag_id"]) else { return nil }
+            let name = (item.firstString(keys: ["name", "title"]) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { return nil }
+            guard seen.insert(id).inserted else { return nil }
+            let color = item.firstString(keys: ["color", "color_hex", "hex"])
+            return AvailableTag(id: id, name: name, colorHex: color)
+        }
+        return parsed.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
     func restoreSession(token: String, companyId: Int) {
         guard !token.isEmpty, companyId > 0 else { return }
         isLoading = true
@@ -596,6 +710,7 @@ final class AppViewModel: ObservableObject {
             if probe != nil {
                 let loaded = await repository.getConversations()
                 conversations = loaded
+                await refreshAvailableTags()
                 isLoading = false
                 isLoggedIn = true
                 screen = .conversations
@@ -611,6 +726,7 @@ final class AppViewModel: ObservableObject {
                 secureStore.removeValue(for: SessionKeys.profileEmail)
                 profileName = ""
                 profileEmail = ""
+                availableTags = []
             }
         }
     }

@@ -50,6 +50,8 @@ final class WidersRepository: ChatRepository {
             let mapped: [Conversation] = rows.compactMap { item in
                 guard let id = item.firstString(keys: ["contact_id", "id", "conversation_id"]) else { return nil }
                 let statusRaw = (item["chats_status"] as? [String: Any])?.firstInt(keys: ["is_open"]) == 0 ? "closed" : (item.firstString(keys: ["status"]) ?? "open")
+                let assignedAgentName = (item["agent"] as? [String: Any])?.firstString(keys: ["name", "full_name", "username"])
+                let tags = parseConversationTags(item)
                 return Conversation(
                     id: id,
                     customerName: item.firstString(keys: ["name", "customer_name", "contact_name", "title"]) ?? "Customer",
@@ -64,7 +66,9 @@ final class WidersRepository: ChatRepository {
                         return rawUnread
                     }(),
                     status: statusRaw == "closed" ? .closed : .open,
-                    isOnline: item.firstBool(keys: ["is_online", "online"]) ?? false
+                    isOnline: item.firstBool(keys: ["is_online", "online"]) ?? false,
+                    assignedAgentName: assignedAgentName,
+                    tags: tags
                 )
             }
             conversationsCache = mapped
@@ -296,6 +300,30 @@ private func sanitizeConversationPreview(_ raw: String) -> String {
         return "Document"
     }
     return "Media"
+}
+
+private func parseConversationTags(_ item: [String: Any]) -> [ConversationTag] {
+    let source = (item["tags_with_duplicates"] as? [[String: Any]])
+        ?? (item["chats_tags"] as? [[String: Any]])
+        ?? []
+    var seen = Set<Int>()
+    return source.compactMap { tag in
+        guard let id = tag.firstInt(keys: ["id", "chats_tag_id", "tag_id"]) else { return nil }
+        guard seen.insert(id).inserted else { return nil }
+        let name = (tag.firstString(keys: ["name", "title"]) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return nil }
+        let colorHex = (tag.firstString(keys: ["color", "hex"]) ?? "#64748B")
+        let attachedAt = (tag["pivot"] as? [String: Any])?.firstString(keys: ["created_at"]) ?? tag.firstString(keys: ["created_at"])
+        let repeatedRows = (tag["duplicates"] as? [[String: Any]]) ?? []
+        let repeatedAt = repeatedRows.compactMap { $0.firstString(keys: ["created_at", "updated_at"]) }
+        return ConversationTag(
+            id: id,
+            name: name,
+            colorHex: colorHex.isEmpty ? "#64748B" : colorHex,
+            attachedAt: attachedAt,
+            repeatedAt: repeatedAt
+        )
+    }
 }
 
 private func formatApiDateTime(_ value: String) -> String {
