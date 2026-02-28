@@ -22,7 +22,11 @@ struct ConversationsView: View {
     @State private var showRemoveConfirm = false
     @State private var quickActionsConversation: Conversation?
     @State private var tagPickerConversationId: String?
+    @State private var tagPickerSearch = ""
+    @State private var tagPickerSearchDebounced = ""
+    @State private var tagPickerDebounceTask: Task<Void, Never>?
     @State private var tagManageContext: TagManageContext?
+    @State private var tagManageSelectedTagId: Int?
     @State private var readFilter: ReadFilter = .all
     @State private var selectedAgentName: String?
     @State private var selectedTagId: Int?
@@ -68,6 +72,14 @@ struct ConversationsView: View {
         if q.isEmpty { return vm.newConversationContacts }
         return vm.newConversationContacts.filter { item in
             item.name.lowercased().contains(q) || item.phone.lowercased().contains(q)
+        }
+    }
+
+    var filteredTagPickerTags: [AvailableTag] {
+        let q = tagPickerSearchDebounced.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if q.isEmpty { return vm.availableTags }
+        return vm.availableTags.filter {
+            $0.name.lowercased().contains(q) || "\($0.id)".contains(q)
         }
     }
 
@@ -237,6 +249,8 @@ struct ConversationsView: View {
                             },
                             onQuickAddTag: {
                                 tagPickerConversationId = convo.id
+                                tagPickerSearch = ""
+                                tagPickerSearchDebounced = ""
                                 Task { await vm.refreshAvailableTags() }
                             },
                             onQuickMarkRead: {
@@ -244,6 +258,7 @@ struct ConversationsView: View {
                             },
                             onTagInfo: { tag in
                                 tagManageContext = TagManageContext(conversationId: convo.id, tag: tag)
+                                tagManageSelectedTagId = tag.id
                             }
                         )
 
@@ -336,6 +351,7 @@ struct ConversationsView: View {
                                 Button {
                                     quickActionsConversation = nil
                                     tagManageContext = TagManageContext(conversationId: convo.id, tag: tag)
+                                    tagManageSelectedTagId = tag.id
                                 } label: {
                                     HStack(spacing: 5) {
                                         Circle()
@@ -398,30 +414,16 @@ struct ConversationsView: View {
                 }
                 .buttonStyle(.plain)
 
-                Menu {
-                    if vm.availableTags.isEmpty {
-                        Text(vm.locale == .ar ? "لا توجد وسوم متاحة" : "No tags available")
-                    } else {
-                        ForEach(vm.availableTags) { tag in
-                            Button {
-                                vm.attachTag(conversationId: convo.id, tagId: tag.id)
-                                quickActionsConversation = nil
-                            } label: {
-                                HStack(spacing: 8) {
-                                    Circle()
-                                        .fill(tagAccentColor(hex: tag.colorHex))
-                                        .frame(width: 10, height: 10)
-                                    Text("\(tag.name) (#\(tag.id))")
-                                }
-                            }
-                        }
-                    }
+                Button {
+                    quickActionsConversation = nil
+                    tagPickerConversationId = convo.id
+                    tagPickerSearch = ""
+                    tagPickerSearchDebounced = ""
+                    Task { await vm.refreshAvailableTags() }
                 } label: {
                     quickActionRowLabel(
                         title: vm.locale == .ar ? "إضافة وسم" : "Add tag",
-                        subtitle: vm.availableTags.isEmpty
-                            ? (vm.locale == .ar ? "جارٍ تحميل الوسوم..." : "Loading tags...")
-                            : (vm.locale == .ar ? "اختر من قائمة الوسوم" : "Pick from available tags"),
+                        subtitle: vm.locale == .ar ? "اختر من كل الوسوم مع البحث" : "Search and pick from all tags",
                         icon: "tag.fill",
                         color: .purple
                     )
@@ -479,59 +481,160 @@ struct ConversationsView: View {
             }
             Button(vm.locale == .ar ? "إلغاء" : "Cancel", role: .cancel) {}
         }
-        .confirmationDialog(
-            vm.locale == .ar ? "إضافة وسم" : "Add tag",
+        .sheet(
             isPresented: Binding(
                 get: { tagPickerConversationId != nil },
-                set: { if !$0 { tagPickerConversationId = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            if vm.availableTags.isEmpty {
-                Button(vm.locale == .ar ? "لا توجد وسوم متاحة" : "No tags available") {}
-            } else {
-                ForEach(vm.availableTags) { tag in
-                    Button("\(tag.name) (#\(tag.id))") {
-                        if let convoId = tagPickerConversationId {
-                            vm.attachTag(conversationId: convoId, tagId: tag.id)
-                        }
+                set: {
+                    if !$0 {
                         tagPickerConversationId = nil
+                        tagPickerSearch = ""
+                        tagPickerSearchDebounced = ""
+                        tagPickerDebounceTask?.cancel()
+                        tagPickerDebounceTask = nil
+                    }
+                }
+            )
+        ) {
+            NavigationStack {
+                Group {
+                    if vm.availableTags.isEmpty {
+                        VStack(spacing: 10) {
+                            Text(vm.locale == .ar ? "لا توجد وسوم متاحة" : "No tags available")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(AppPalette.textPrimary)
+                            Text(vm.locale == .ar ? "تأكد من مزامنة الوسوم من الإعدادات." : "Please sync tags from Settings.")
+                                .font(.system(size: 12))
+                                .foregroundStyle(AppPalette.textMuted)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                        .padding(.horizontal, 20)
+                    } else {
+                        List {
+                            ForEach(filteredTagPickerTags) { tag in
+                                Button {
+                                    if let convoId = tagPickerConversationId {
+                                        vm.attachTag(conversationId: convoId, tagId: tag.id)
+                                    }
+                                    tagPickerConversationId = nil
+                                    tagPickerSearch = ""
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        Circle()
+                                            .fill(tagAccentColor(hex: tag.colorHex))
+                                            .frame(width: 10, height: 10)
+                                        Text(tag.name)
+                                            .foregroundStyle(AppPalette.textPrimary)
+                                            .lineLimit(1)
+                                        Spacer()
+                                        Text("#\(tag.id)")
+                                            .font(.system(size: 11))
+                                            .foregroundStyle(AppPalette.textMuted)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .listStyle(.plain)
+                    }
+                }
+                .searchable(
+                    text: $tagPickerSearch,
+                    placement: .navigationBarDrawer(displayMode: .always),
+                    prompt: vm.locale == .ar ? "بحث الوسوم" : "Search tags"
+                )
+                .onChange(of: tagPickerSearch) { _, value in
+                    tagPickerDebounceTask?.cancel()
+                    tagPickerDebounceTask = Task {
+                        try? await Task.sleep(nanoseconds: 220_000_000)
+                        guard !Task.isCancelled else { return }
+                        await MainActor.run {
+                            tagPickerSearchDebounced = value
+                        }
+                    }
+                }
+                .navigationTitle(vm.locale == .ar ? "إضافة وسم سريع" : "Quick add tag")
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button(vm.locale == .ar ? "إغلاق" : "Close") {
+                            tagPickerConversationId = nil
+                            tagPickerSearch = ""
+                            tagPickerSearchDebounced = ""
+                            tagPickerDebounceTask?.cancel()
+                            tagPickerDebounceTask = nil
+                        }
                     }
                 }
             }
-            Button(vm.locale == .ar ? "إلغاء" : "Cancel", role: .cancel) {
-                tagPickerConversationId = nil
-            }
-        } message: {
-            Text(vm.locale == .ar ? "اختر وسمًا لإرفاقه بالمحادثة." : "Select a tag to attach to this conversation.")
+            .presentationDetents([.medium, .large])
         }
         .sheet(item: $tagManageContext) { context in
+            let conversationTags = vm.conversations.first(where: { $0.id == context.conversationId })?.tags ?? [context.tag]
+            let activeTag = conversationTags.first(where: { $0.id == tagManageSelectedTagId }) ?? context.tag
             VStack(alignment: .leading, spacing: 12) {
-                Text(context.tag.name)
+                Text(activeTag.name)
                     .font(.system(size: 20, weight: .bold))
                     .foregroundStyle(AppPalette.textPrimary)
+
+                if !conversationTags.isEmpty {
+                    Text(vm.locale == .ar ? "كل الوسوم:" : "All tags:")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(AppPalette.textSecondary)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(conversationTags, id: \.id) { tag in
+                                Button {
+                                    tagManageSelectedTagId = tag.id
+                                } label: {
+                                    HStack(spacing: 5) {
+                                        Text(tag.repeatedAt.isEmpty ? "1" : "\(tag.repeatedAt.count)")
+                                            .font(.system(size: 10, weight: .bold))
+                                            .foregroundStyle(.white)
+                                            .frame(width: 16, height: 16)
+                                            .background(Color.white.opacity(0.22))
+                                            .clipShape(Circle())
+                                        Text(tag.name)
+                                            .font(.system(size: 11, weight: .semibold))
+                                            .foregroundStyle(.white)
+                                    }
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 5)
+                                    .background(tagAccentColor(hex: tag.colorHex))
+                                    .overlay {
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .stroke(
+                                                tag.id == activeTag.id ? Color.white.opacity(0.9) : Color.clear,
+                                                lineWidth: 1.2
+                                            )
+                                    }
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
 
                 Text(vm.locale == .ar ? "تاريخ الإضافة:" : "Added at:")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(AppPalette.textSecondary)
-                Text(formatTagHistoryDate(context.tag.attachedAt))
+                Text(formatTagHistoryDate(activeTag.attachedAt))
                     .font(.system(size: 13))
                     .foregroundStyle(AppPalette.textMuted)
 
                 Text(
                     vm.locale == .ar
-                        ? "تواريخ التكرار (\(context.tag.repeatedAt.count)):"
-                        : "Repeat history (\(context.tag.repeatedAt.count)):"
+                        ? "تواريخ التكرار (\(activeTag.repeatedAt.count)):"
+                        : "Repeat history (\(activeTag.repeatedAt.count)):"
                 )
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(AppPalette.textSecondary)
 
-                if context.tag.repeatedAt.isEmpty {
+                if activeTag.repeatedAt.isEmpty {
                     Text(vm.locale == .ar ? "لا يوجد تكرار" : "No repeats")
                         .font(.system(size: 12))
                         .foregroundStyle(AppPalette.textMuted)
                 } else {
-                    ForEach(Array(context.tag.repeatedAt.prefix(5)), id: \.self) { value in
+                    ForEach(Array(activeTag.repeatedAt.prefix(5)), id: \.self) { value in
                         Text("• \(formatTagHistoryDate(value))")
                             .font(.system(size: 12))
                             .foregroundStyle(AppPalette.textMuted)
@@ -542,8 +645,9 @@ struct ConversationsView: View {
 
                 HStack(spacing: 10) {
                     Button(vm.locale == .ar ? "إزالة" : "Detach") {
-                        vm.detachTag(conversationId: context.conversationId, tagId: context.tag.id)
+                        vm.detachTag(conversationId: context.conversationId, tagId: activeTag.id)
                         tagManageContext = nil
+                        tagManageSelectedTagId = nil
                     }
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.red)
@@ -554,8 +658,9 @@ struct ConversationsView: View {
                     .buttonStyle(.plain)
 
                     Button(vm.locale == .ar ? "تكرار" : "Repeat") {
-                        vm.repeatTag(conversationId: context.conversationId, tagId: context.tag.id)
+                        vm.repeatTag(conversationId: context.conversationId, tagId: activeTag.id)
                         tagManageContext = nil
+                        tagManageSelectedTagId = nil
                     }
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(AppPalette.primary)
@@ -569,6 +674,7 @@ struct ConversationsView: View {
 
                     Button(vm.locale == .ar ? "إغلاق" : "Close") {
                         tagManageContext = nil
+                        tagManageSelectedTagId = nil
                     }
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(AppPalette.textSecondary)

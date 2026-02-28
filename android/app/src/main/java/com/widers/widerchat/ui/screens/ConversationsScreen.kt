@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -66,6 +68,7 @@ import com.widers.widerchat.domain.model.Conversation
 import com.widers.widerchat.domain.model.ConversationTag
 import com.widers.widerchat.domain.model.ConversationStatus
 import com.widers.widerchat.ui.NewConversationContact
+import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
@@ -114,6 +117,13 @@ fun ConversationsScreen(
     var newName by remember { mutableStateOf("") }
     var newPhone by remember { mutableStateOf("") }
     var contactSearch by remember { mutableStateOf("") }
+    var tagPickerSearch by remember { mutableStateOf("") }
+    var tagPickerSearchDebounced by remember { mutableStateOf("") }
+
+    LaunchedEffect(tagPickerSearch) {
+        delay(220)
+        tagPickerSearchDebounced = tagPickerSearch
+    }
 
     val agentChoices = remember(conversations) {
         conversations.mapNotNull { it.assignedAgentName?.trim() }.filter { it.isNotBlank() }.distinct()
@@ -331,23 +341,25 @@ fun ConversationsScreen(
             LazyColumn {
                 items(filtered, key = { it.id }) { convo ->
                     val isSelected = selectedConversationIds.contains(convo.id)
+                    val markReadAction = convo.unreadCount > 0
                     val dismissState = rememberSwipeToDismissBoxState(
-                        positionalThreshold = { totalDistance -> totalDistance * 0.14f },
-                        confirmValueChange = { !selectionMode }
-                    )
-                    LaunchedEffect(dismissState.currentValue, convo.unreadCount, convo.id) {
-                        when (dismissState.currentValue) {
-                            SwipeToDismissBoxValue.StartToEnd -> {
-                                swipedConversation = convo
-                                dismissState.reset()
+                        positionalThreshold = { totalDistance -> totalDistance * 0.18f },
+                        confirmValueChange = { target ->
+                            if (selectionMode) return@rememberSwipeToDismissBoxState false
+                            if (target == SwipeToDismissBoxValue.Settled) return@rememberSwipeToDismissBoxState true
+                            when (target) {
+                                SwipeToDismissBoxValue.StartToEnd -> {
+                                    swipedConversation = convo
+                                    false
+                                }
+                                SwipeToDismissBoxValue.EndToStart -> {
+                                    onMarkReadQuick(convo.id, markReadAction)
+                                    false
+                                }
+                                SwipeToDismissBoxValue.Settled -> true
                             }
-                            SwipeToDismissBoxValue.EndToStart -> {
-                                swipedConversation = convo
-                                dismissState.reset()
-                            }
-                            SwipeToDismissBoxValue.Settled -> Unit
                         }
-                    }
+                    )
                     if (selectionMode) {
                         Surface(color = MaterialTheme.colorScheme.surface) {
                             Column {
@@ -366,7 +378,11 @@ fun ConversationsScreen(
                                     onLongPress = {
                                         selectedConversationIds = selectedConversationIds + convo.id
                                     },
-                                    onQuickAddTag = { tagPickerConversationId = convo.id },
+                                    onQuickAddTag = {
+                                        tagPickerConversationId = convo.id
+                                        tagPickerSearch = ""
+                                        tagPickerSearchDebounced = ""
+                                    },
                                     onQuickMarkRead = { onMarkReadQuick(convo.id, true) },
                                     onTagInfo = { tag ->
                                         tagManageConversationId = convo.id
@@ -400,7 +416,7 @@ fun ConversationsScreen(
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Icon(Icons.Outlined.Close, null, tint = Color.White)
+                                            Icon(Icons.Outlined.ChatBubbleOutline, null, tint = Color.White)
                                             Text(
                                                 if (locale == AppLocale.AR) "إجراءات" else "Actions",
                                                 color = Color.White,
@@ -420,7 +436,11 @@ fun ConversationsScreen(
                                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                             Icon(Icons.Outlined.Check, null, tint = Color.White)
                                             Text(
-                                                if (locale == AppLocale.AR) "سريعة" else "Quick",
+                                                if (markReadAction) {
+                                                    if (locale == AppLocale.AR) "تحديد كمقروء" else "Mark read"
+                                                } else {
+                                                    if (locale == AppLocale.AR) "تحديد كغير مقروء" else "Mark unread"
+                                                },
                                                 color = Color.White,
                                                 fontWeight = FontWeight.SemiBold
                                             )
@@ -441,7 +461,11 @@ fun ConversationsScreen(
                                         onLongPress = {
                                             selectedConversationIds = selectedConversationIds + convo.id
                                         },
-                                        onQuickAddTag = { tagPickerConversationId = convo.id },
+                                        onQuickAddTag = {
+                                            tagPickerConversationId = convo.id
+                                            tagPickerSearch = ""
+                                            tagPickerSearchDebounced = ""
+                                        },
                                         onQuickMarkRead = { onMarkReadQuick(convo.id, true) },
                                         onTagInfo = { tag ->
                                             tagManageConversationId = convo.id
@@ -570,6 +594,8 @@ fun ConversationsScreen(
                     subtitle = if (locale == AppLocale.AR) "تطبيق وسم بسرعة على المحادثة" else "Apply a tag quickly to this conversation",
                     onClick = {
                         tagPickerConversationId = active.id
+                        tagPickerSearch = ""
+                        tagPickerSearchDebounced = ""
                         swipedConversation = null
                     }
                 )
@@ -763,11 +789,34 @@ fun ConversationsScreen(
     }
 
     if (tagPickerConversationId != null) {
+        val q = tagPickerSearchDebounced.trim().lowercase()
+        val filteredTags = if (q.isBlank()) {
+            availableTags
+        } else {
+            availableTags.filter { tag ->
+                tag.name.lowercase().contains(q) || tag.id.toString().contains(q)
+            }
+        }
         AlertDialog(
-            onDismissRequest = { tagPickerConversationId = null },
+            onDismissRequest = {
+                tagPickerConversationId = null
+                tagPickerSearch = ""
+                tagPickerSearchDebounced = ""
+            },
             title = { Text(if (locale == AppLocale.AR) "إضافة وسم سريع" else "Quick add tag") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    OutlinedTextField(
+                        value = tagPickerSearch,
+                        onValueChange = { tagPickerSearch = it },
+                        singleLine = true,
+                        label = { Text(if (locale == AppLocale.AR) "بحث الوسوم" else "Search tags") }
+                    )
                     if (availableTags.isEmpty()) {
                         Text(
                             if (locale == AppLocale.AR) "لا توجد وسوم متاحة." else "No available tags.",
@@ -775,13 +824,15 @@ fun ConversationsScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     } else {
-                        availableTags.take(10).forEach { tag ->
+                        filteredTags.forEach { tag ->
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable {
                                         tagPickerConversationId?.let { onAttachTagQuick(it, tag.id) }
                                         tagPickerConversationId = null
+                                        tagPickerSearch = ""
+                                        tagPickerSearchDebounced = ""
                                     }
                                     .padding(vertical = 8.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -796,18 +847,35 @@ fun ConversationsScreen(
                             }
                             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
                         }
+                        if (filteredTags.isEmpty()) {
+                            Text(
+                                if (locale == AppLocale.AR) "لا توجد نتائج." else "No results.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             },
             dismissButton = {
-                TextButton(onClick = { tagPickerConversationId = null }) { Text(tr(locale, TextKey.CLOSE)) }
+                TextButton(onClick = {
+                    tagPickerConversationId = null
+                    tagPickerSearch = ""
+                    tagPickerSearchDebounced = ""
+                }) { Text(tr(locale, TextKey.CLOSE)) }
             },
             confirmButton = {}
         )
     }
 
     if (tagManageItem != null && tagManageConversationId != null) {
-        val activeTag = tagManageItem!!
+        val initialTag = tagManageItem!!
+        val conversationTags = conversations.firstOrNull { it.id == tagManageConversationId }?.tags.orEmpty()
+        var activeTag by remember(tagManageItem, tagManageConversationId, conversationTags) {
+            mutableStateOf(
+                conversationTags.firstOrNull { it.id == initialTag.id } ?: initialTag
+            )
+        }
         AlertDialog(
             onDismissRequest = {
                 tagManageItem = null
@@ -816,6 +884,42 @@ fun ConversationsScreen(
             title = { Text(activeTag.name) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (conversationTags.isNotEmpty()) {
+                        Text(
+                            if (locale == AppLocale.AR) "كل الوسوم:" else "All tags:",
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Row(
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            conversationTags.forEach { tag ->
+                                Surface(
+                                    shape = RoundedCornerShape(999.dp),
+                                    color = parseHexColor(tag.colorHex),
+                                    modifier = Modifier.clickable { activeTag = tag }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            if (tag.repeatedAt.isEmpty()) "1" else "${tag.repeatedAt.size}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color.White
+                                        )
+                                        Spacer(Modifier.size(5.dp))
+                                        Text(
+                                            tag.name,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color.White
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                     Text(
                         if (locale == AppLocale.AR) "تاريخ الإضافة:" else "Added at:",
                         fontWeight = FontWeight.SemiBold
