@@ -62,6 +62,8 @@ final class AppViewModel: ObservableObject {
     @Published var isChatLoading = false
     @Published var newConversationContacts: [NewConversationContact] = []
     @Published var availableTags: [AvailableTag] = []
+    @Published var availableAgents: [AvailableAgent] = []
+    @Published var availableCustomFields: [AvailableCustomField] = []
     @Published var profileName = ""
     @Published var profileEmail = ""
     private var localOutgoingByConversation: [String: [ChatMessage]] = [:]
@@ -97,6 +99,7 @@ final class AppViewModel: ObservableObject {
             let loaded = await repository.getConversations()
             conversations = loaded
             await refreshAvailableTags()
+            await refreshAvailableAgents()
             let profile = repository.currentUserSnapshot()
             profileName = profile.name ?? ""
             profileEmail = profile.email ?? ""
@@ -123,6 +126,8 @@ final class AppViewModel: ObservableObject {
         actionStatus = nil
         profileName = ""
         profileEmail = ""
+        availableAgents = []
+        availableCustomFields = []
         secureStore.removeValue(for: SessionKeys.profileName)
         secureStore.removeValue(for: SessionKeys.profileEmail)
     }
@@ -391,7 +396,15 @@ final class AppViewModel: ObservableObject {
             isActionLoading = true
             let result = await repository.attachTag(contactId: contactId, tagId: tagId)
             isActionLoading = false
-            actionStatus = result == nil ? "Failed: unable to attach tag" : "Tag attached"
+            guard result != nil else {
+                actionStatus = "Failed: unable to attach tag"
+                return
+            }
+            conversations = await repository.getConversations()
+            if activeChatId == id {
+                activeMessages = await repository.getMessages(conversationId: id)
+            }
+            actionStatus = "Tag attached"
         }
     }
 
@@ -401,7 +414,15 @@ final class AppViewModel: ObservableObject {
             isActionLoading = true
             let result = await repository.detachTag(contactId: contactId, tagId: tagId)
             isActionLoading = false
-            actionStatus = result == nil ? "Failed: unable to detach tag" : "Tag detached"
+            guard result != nil else {
+                actionStatus = "Failed: unable to detach tag"
+                return
+            }
+            conversations = await repository.getConversations()
+            if activeChatId == id {
+                activeMessages = await repository.getMessages(conversationId: id)
+            }
+            actionStatus = "Tag detached"
         }
     }
 
@@ -433,6 +454,18 @@ final class AppViewModel: ObservableObject {
             isActionLoading = false
             actionStatus = result == nil ? "Failed: unable to sync custom field" : "Custom field synced"
         }
+    }
+
+    func refreshCurrentContactCustomFields() async {
+        guard let id = activeChatId, let contactId = Int(id) else {
+            availableCustomFields = []
+            return
+        }
+        guard let payload = await repository.getContactCustomFields(contactId: contactId) else {
+            availableCustomFields = []
+            return
+        }
+        availableCustomFields = parseAvailableCustomFields(payload)
     }
 
     func deleteCurrentChat() {
@@ -484,6 +517,7 @@ final class AppViewModel: ObservableObject {
             let c5 = await repository.getFlowsList()
             let c6 = await repository.getAgentsList()
             availableTags = c3.map(parseAvailableTags) ?? []
+            availableAgents = c6.map(parseAvailableAgents) ?? []
             isActionLoading = false
             let allOk = [c1, c2, c3, c4, c5, c6].allSatisfy { $0 != nil }
             actionStatus = allOk ? "Support data synced" : "Failed: support data sync incomplete"
@@ -684,6 +718,14 @@ final class AppViewModel: ObservableObject {
         availableTags = parseAvailableTags(payload)
     }
 
+    func refreshAvailableAgents() async {
+        guard let payload = await repository.getAgentsList() else {
+            availableAgents = []
+            return
+        }
+        availableAgents = parseAvailableAgents(payload)
+    }
+
     private func parseAvailableTags(_ payload: [String: Any]) -> [AvailableTag] {
         let rows = payload.firstArray(keys: ["tags", "data", "rows", "result"])
         var seen = Set<Int>()
@@ -696,6 +738,58 @@ final class AppViewModel: ObservableObject {
             return AvailableTag(id: id, name: name, colorHex: color)
         }
         return parsed.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    private func parseAvailableAgents(_ payload: [String: Any]) -> [AvailableAgent] {
+        let rows = payload.firstArray(keys: ["agents", "data", "rows", "result"])
+        var seen = Set<Int>()
+        let parsed: [AvailableAgent] = rows.compactMap { item in
+            guard let id = item.firstInt(keys: ["id", "agent_id", "user_id"]) else { return nil }
+            let name = (item.firstString(keys: ["name", "full_name", "username"]) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty, seen.insert(id).inserted else { return nil }
+            return AvailableAgent(id: id, name: name)
+        }
+        return parsed.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    private func parseAvailableCustomFields(_ payload: [String: Any]) -> [AvailableCustomField] {
+        var rows = payload.firstArray(keys: ["fields", "custom_fields", "data", "rows", "result"])
+        if rows.isEmpty, let dataObj = payload["data"] as? [String: Any] {
+            rows = dataObj.firstArray(keys: ["fields", "custom_fields", "rows", "result"])
+        }
+
+        var seen = Set<String>()
+        var parsed: [AvailableCustomField] = rows.compactMap { item in
+            let id = (item.firstString(keys: ["id", "field_id", "key", "name"]) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !id.isEmpty, seen.insert(id).inserted else { return nil }
+            let label = (item.firstString(keys: ["label", "name", "title", "key"]) ?? id).trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = item.firstString(keys: ["value", "field_value", "current", "default"])
+            return AvailableCustomField(id: id, label: label, value: value)
+        }
+
+        func appendFromMap(_ map: [String: Any]?) {
+            guard let map else { return }
+            for (key, rawValue) in map {
+                let id = key.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !id.isEmpty, seen.insert(id).inserted else { continue }
+                if let obj = rawValue as? [String: Any] {
+                    let label = (obj.firstString(keys: ["label", "name", "title", "key"]) ?? id).trimmingCharacters(in: .whitespacesAndNewlines)
+                    let value = obj.firstString(keys: ["value", "field_value", "current", "default"])
+                    parsed.append(AvailableCustomField(id: id, label: label, value: value))
+                } else {
+                    parsed.append(AvailableCustomField(id: id, label: id, value: String(describing: rawValue)))
+                }
+            }
+        }
+
+        appendFromMap(payload["custom"] as? [String: Any])
+        appendFromMap(payload["fields"] as? [String: Any])
+        if let dataObj = payload["data"] as? [String: Any] {
+            appendFromMap(dataObj["custom"] as? [String: Any])
+            appendFromMap(dataObj["fields"] as? [String: Any])
+        }
+
+        return parsed.sorted { $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending }
     }
 
     func restoreSession(token: String, companyId: Int) {
@@ -711,6 +805,7 @@ final class AppViewModel: ObservableObject {
                 let loaded = await repository.getConversations()
                 conversations = loaded
                 await refreshAvailableTags()
+                await refreshAvailableAgents()
                 isLoading = false
                 isLoggedIn = true
                 screen = .conversations
@@ -727,6 +822,8 @@ final class AppViewModel: ObservableObject {
                 profileName = ""
                 profileEmail = ""
                 availableTags = []
+                availableAgents = []
+                availableCustomFields = []
             }
         }
     }

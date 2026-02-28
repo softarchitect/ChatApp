@@ -838,7 +838,19 @@ fun ConversationsScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(tag.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(10.dp)
+                                            .clip(CircleShape)
+                                            .background(parseHexColor(tag.colorHex))
+                                    )
+                                    Text(tag.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
                                 Text(
                                     "#${tag.id}",
                                     style = MaterialTheme.typography.labelSmall,

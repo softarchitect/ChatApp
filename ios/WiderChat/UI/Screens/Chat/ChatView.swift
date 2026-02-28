@@ -18,12 +18,13 @@ struct ChatView: View {
     @State private var showFlowDialog = false
     @State private var showCustomFieldDialog = false
     @State private var showDeleteConfirm = false
-    @State private var agentInput = ""
-    @State private var tagInput = ""
+    @State private var agentSearch = ""
+    @State private var tagSearch = ""
     @State private var templateInput = ""
     @State private var flowInput = ""
     @State private var customFieldId = ""
     @State private var customFieldValue = ""
+    @State private var customFieldSearch = ""
     @State private var isNearBottom = true
     @State private var forceAutoScroll = false
     @State private var shouldScrollToLatestOnOpen = true
@@ -99,16 +100,28 @@ struct ChatView: View {
                     Button((currentConversation?.status ?? .open) == .open ? tr(vm.locale, .closeConversation) : tr(vm.locale, .reopenConversation)) {
                         vm.toggleConversationStatus()
                     }
-                    Button(tr(vm.locale, .assignAgent)) { showAssignAgentDialog = true }
+                    Button(tr(vm.locale, .assignAgent)) {
+                        showAssignAgentDialog = true
+                        agentSearch = ""
+                        Task { await vm.refreshAvailableAgents() }
+                    }
                     Button(tr(vm.locale, .unassignAgent)) { vm.unassignCurrentChat() }
                     Button(tr(vm.locale, .muteConversation)) { vm.muteCurrentChat(true) }
                     Button(tr(vm.locale, .unmuteConversation)) { vm.muteCurrentChat(false) }
                     Button(tr(vm.locale, .markAsRead)) { vm.markCurrentChatRead(true) }
                     Button(tr(vm.locale, .markAsUnread)) { vm.markCurrentChatRead(false) }
-                    Button(tr(vm.locale, .attachDetachTag)) { showTagDialog = true }
+                    Button(tr(vm.locale, .attachDetachTag)) {
+                        showTagDialog = true
+                        tagSearch = ""
+                        Task { await vm.refreshAvailableTags() }
+                    }
                     Button(tr(vm.locale, .sendTemplate)) { showTemplateDialog = true }
                     Button(tr(vm.locale, .sendFlow)) { showFlowDialog = true }
-                    Button(tr(vm.locale, .syncCustomField)) { showCustomFieldDialog = true }
+                    Button(tr(vm.locale, .syncCustomField)) {
+                        showCustomFieldDialog = true
+                        customFieldSearch = ""
+                        Task { await vm.refreshCurrentContactCustomFields() }
+                    }
                     Button(tr(vm.locale, .deleteChat), role: .destructive) { showDeleteConfirm = true }
                 } label: {
                     Image(systemName: "ellipsis.circle")
@@ -459,25 +472,152 @@ struct ChatView: View {
             audioRecorder = nil
             isRecordingVoice = false
         }
-        .alert(tr(vm.locale, .assignAgentTitle), isPresented: $showAssignAgentDialog) {
-            TextField(tr(vm.locale, .agentId), text: $agentInput)
-            Button(tr(vm.locale, .cancel), role: .cancel) {}
-            Button(tr(vm.locale, .assignAgent)) {
-                if let value = Int(agentInput) { vm.assignCurrentChat(agentId: value) }
-                agentInput = ""
+        .sheet(isPresented: $showAssignAgentDialog) {
+            NavigationStack {
+                let q = agentSearch.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                let filteredAgents = q.isEmpty
+                    ? vm.availableAgents
+                    : vm.availableAgents.filter { $0.name.lowercased().contains(q) || "\($0.id)".contains(q) }
+                Group {
+                    if vm.availableAgents.isEmpty {
+                        VStack(spacing: 10) {
+                            Text(vm.locale == .ar ? "لا يوجد وكلاء متاحون" : "No agents available")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(AppPalette.textPrimary)
+                            Text(vm.locale == .ar ? "قم بمزامنة بيانات الدعم ثم حاول مرة أخرى." : "Sync support data, then try again.")
+                                .font(.system(size: 12))
+                                .foregroundStyle(AppPalette.textMuted)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                        .padding(.horizontal, 20)
+                    } else {
+                        List {
+                            ForEach(filteredAgents) { agent in
+                                Button {
+                                    vm.assignCurrentChat(agentId: agent.id)
+                                    showAssignAgentDialog = false
+                                    agentSearch = ""
+                                } label: {
+                                    HStack {
+                                        Text(agent.name)
+                                            .foregroundStyle(AppPalette.textPrimary)
+                                        Spacer()
+                                        Text("#\(agent.id)")
+                                            .font(.system(size: 11))
+                                            .foregroundStyle(AppPalette.textMuted)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .listStyle(.plain)
+                    }
+                }
+                .searchable(
+                    text: $agentSearch,
+                    placement: .navigationBarDrawer(displayMode: .always),
+                    prompt: vm.locale == .ar ? "بحث الوكلاء" : "Search agents"
+                )
+                .navigationTitle(tr(vm.locale, .assignAgentTitle))
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button(tr(vm.locale, .close)) {
+                            showAssignAgentDialog = false
+                            agentSearch = ""
+                        }
+                    }
+                }
             }
+            .presentationDetents([.medium, .large])
         }
-        .alert(tr(vm.locale, .attachDetachTagTitle), isPresented: $showTagDialog) {
-            TextField(tr(vm.locale, .tagId), text: $tagInput)
-            Button(tr(vm.locale, .cancel), role: .cancel) {}
-            Button(tr(vm.locale, .attach)) {
-                if let value = Int(tagInput) { vm.attachTagToCurrentChat(tagId: value) }
-                tagInput = ""
+        .sheet(isPresented: $showTagDialog) {
+            NavigationStack {
+                let attachedTagIds = Set((currentConversation?.tags ?? []).map(\.id))
+                let q = tagSearch.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                let filteredTags = q.isEmpty
+                    ? vm.availableTags
+                    : vm.availableTags.filter { $0.name.lowercased().contains(q) || "\($0.id)".contains(q) }
+                VStack(spacing: 0) {
+                    if let convo = currentConversation, !convo.tags.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(vm.locale == .ar ? "الوسوم الحالية:" : "Attached tags:")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(AppPalette.textSecondary)
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 8) {
+                                    ForEach(convo.tags, id: \.id) { tag in
+                                        Button {
+                                            vm.detachTagFromCurrentChat(tagId: tag.id)
+                                        } label: {
+                                            HStack(spacing: 6) {
+                                                Circle()
+                                                    .fill(tagAccentColor(hex: tag.colorHex))
+                                                    .frame(width: 8, height: 8)
+                                                Text(tag.name)
+                                                    .font(.system(size: 11, weight: .semibold))
+                                                    .foregroundStyle(AppPalette.textPrimary)
+                                                Text("×")
+                                                    .font(.system(size: 11, weight: .bold))
+                                                    .foregroundStyle(.red)
+                                            }
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 5)
+                                            .background(AppPalette.card)
+                                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+                    }
+
+                    List {
+                        ForEach(filteredTags) { tag in
+                            let isAttached = attachedTagIds.contains(tag.id)
+                            Button {
+                                if isAttached {
+                                    vm.detachTagFromCurrentChat(tagId: tag.id)
+                                } else {
+                                    vm.attachTagToCurrentChat(tagId: tag.id)
+                                }
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Circle()
+                                        .fill(tagAccentColor(hex: tag.colorHex))
+                                        .frame(width: 10, height: 10)
+                                    Text(tag.name)
+                                        .foregroundStyle(AppPalette.textPrimary)
+                                        .lineLimit(1)
+                                    Spacer()
+                                    Text(isAttached ? (vm.locale == .ar ? "مرفق" : "Attached") : "#\(tag.id)")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(isAttached ? AppPalette.primary : AppPalette.textMuted)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .listStyle(.plain)
+                }
+                .searchable(
+                    text: $tagSearch,
+                    placement: .navigationBarDrawer(displayMode: .always),
+                    prompt: vm.locale == .ar ? "بحث الوسوم" : "Search tags"
+                )
+                .navigationTitle(tr(vm.locale, .attachDetachTagTitle))
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button(tr(vm.locale, .close)) {
+                            showTagDialog = false
+                            tagSearch = ""
+                        }
+                    }
+                }
             }
-            Button(tr(vm.locale, .detach)) {
-                if let value = Int(tagInput) { vm.detachTagFromCurrentChat(tagId: value) }
-                tagInput = ""
-            }
+            .presentationDetents([.medium, .large])
         }
         .alert(tr(vm.locale, .sendTemplateTitle), isPresented: $showTemplateDialog) {
             TextField(tr(vm.locale, .templateId), text: $templateInput)
@@ -495,15 +635,82 @@ struct ChatView: View {
                 flowInput = ""
             }
         }
-        .alert(tr(vm.locale, .syncCustomFieldTitle), isPresented: $showCustomFieldDialog) {
-            TextField(tr(vm.locale, .fieldId), text: $customFieldId)
-            TextField(tr(vm.locale, .fieldValue), text: $customFieldValue)
-            Button(tr(vm.locale, .cancel), role: .cancel) {}
-            Button(tr(vm.locale, .sync)) {
-                vm.syncCurrentContactCustomField(fieldId: customFieldId, fieldValue: customFieldValue)
-                customFieldId = ""
-                customFieldValue = ""
+        .sheet(isPresented: $showCustomFieldDialog) {
+            NavigationStack {
+                let q = customFieldSearch.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                let filteredFields = q.isEmpty
+                    ? vm.availableCustomFields
+                    : vm.availableCustomFields.filter {
+                        $0.label.lowercased().contains(q) || $0.id.lowercased().contains(q)
+                    }
+                VStack(spacing: 0) {
+                    List {
+                        ForEach(filteredFields) { field in
+                            Button {
+                                customFieldId = field.id
+                                if customFieldValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                    customFieldValue = field.value ?? ""
+                                }
+                            } label: {
+                                HStack {
+                                    Text(field.label)
+                                        .foregroundStyle(AppPalette.textPrimary)
+                                        .lineLimit(1)
+                                    Spacer()
+                                    Text("#\(field.id)")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(AppPalette.textMuted)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .listStyle(.plain)
+
+                    VStack(spacing: 10) {
+                        TextField(tr(vm.locale, .fieldId), text: $customFieldId)
+                            .padding(.horizontal, 12)
+                            .frame(height: 44)
+                            .background(AppPalette.card)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                        TextField(tr(vm.locale, .fieldValue), text: $customFieldValue)
+                            .padding(.horizontal, 12)
+                            .frame(height: 44)
+                            .background(AppPalette.card)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                        Button(tr(vm.locale, .sync)) {
+                            vm.syncCurrentContactCustomField(fieldId: customFieldId, fieldValue: customFieldValue)
+                            showCustomFieldDialog = false
+                            customFieldId = ""
+                            customFieldValue = ""
+                            customFieldSearch = ""
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 44)
+                        .background(customFieldId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? AppPalette.textMuted.opacity(0.3) : AppPalette.primary)
+                        .foregroundStyle(.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .disabled(customFieldId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                }
+                .searchable(
+                    text: $customFieldSearch,
+                    placement: .navigationBarDrawer(displayMode: .always),
+                    prompt: vm.locale == .ar ? "بحث الحقول" : "Search fields"
+                )
+                .navigationTitle(tr(vm.locale, .syncCustomFieldTitle))
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button(tr(vm.locale, .close)) {
+                            showCustomFieldDialog = false
+                            customFieldSearch = ""
+                        }
+                    }
+                }
             }
+            .presentationDetents([.medium, .large])
         }
         .alert(tr(vm.locale, .deleteChatQuestion), isPresented: $showDeleteConfirm) {
             Button(tr(vm.locale, .cancel), role: .cancel) {}
@@ -1139,6 +1346,30 @@ private struct MediaLinksDocsSheet: View {
                     openURL(url)
                 }
             }
+        }
+    }
+
+    private func tagAccentColor(hex: String?) -> Color {
+        guard var hex else { return Color(red: 0.39, green: 0.45, blue: 0.55) }
+        hex = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if hex.hasPrefix("#") { hex.removeFirst() }
+        guard let value = UInt64(hex, radix: 16) else { return Color(red: 0.39, green: 0.45, blue: 0.55) }
+        switch hex.count {
+        case 6:
+            return Color(
+                red: Double((value >> 16) & 0xFF) / 255.0,
+                green: Double((value >> 8) & 0xFF) / 255.0,
+                blue: Double(value & 0xFF) / 255.0
+            )
+        case 8:
+            return Color(
+                red: Double((value >> 24) & 0xFF) / 255.0,
+                green: Double((value >> 16) & 0xFF) / 255.0,
+                blue: Double((value >> 8) & 0xFF) / 255.0,
+                opacity: Double(value & 0xFF) / 255.0
+            )
+        default:
+            return Color(red: 0.39, green: 0.45, blue: 0.55)
         }
     }
 }

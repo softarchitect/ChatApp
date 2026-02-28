@@ -2,9 +2,12 @@ package com.widers.widerchat.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.widers.widerchat.data.remote.ApiHttpException
 import com.widers.widerchat.data.repository.NetworkChatRepository
 import com.widers.widerchat.domain.model.AppLocale
 import com.widers.widerchat.domain.model.AppScreen
+import com.widers.widerchat.domain.model.AvailableAgent
+import com.widers.widerchat.domain.model.AvailableCustomField
 import com.widers.widerchat.domain.model.AvailableTag
 import com.widers.widerchat.domain.model.ChatMessage
 import com.widers.widerchat.domain.model.Conversation
@@ -36,6 +39,8 @@ data class AppUiState(
     val profileName: String = "",
     val profileEmail: String = "",
     val availableTags: List<AvailableTag> = emptyList(),
+    val availableAgents: List<AvailableAgent> = emptyList(),
+    val availableCustomFields: List<AvailableCustomField> = emptyList(),
     val screen: AppScreen = AppScreen.LOGIN,
     val activeChatId: String? = null,
     val conversations: List<Conversation> = emptyList(),
@@ -81,6 +86,7 @@ class AppViewModel(
                     profileEmail = profileEmail.orEmpty()
                 )
                 refreshAvailableTags()
+                refreshAvailableAgents()
             } catch (_: Exception) {
                 _uiState.value = _uiState.value.copy(isLoading = false, loginError = true)
             }
@@ -111,6 +117,7 @@ class AppViewModel(
                     profileEmail = profileEmail.orEmpty().ifBlank { fallbackProfileEmail.trim() }
                 )
                 refreshAvailableTags()
+                refreshAvailableAgents()
             } catch (_: Exception) {
                 _uiState.value = _uiState.value.copy(isLoading = false, isLoggedIn = false, loginError = true)
             }
@@ -131,7 +138,9 @@ class AppViewModel(
             isChatLoading = false,
             actionStatus = null,
             profileName = "",
-            profileEmail = ""
+            profileEmail = "",
+            availableAgents = emptyList(),
+            availableCustomFields = emptyList()
         )
     }
 
@@ -377,21 +386,43 @@ class AppViewModel(
     }
 
     fun attachTagToCurrentChat(tagId: Long) {
-        val contactId = _uiState.value.activeChatId?.toLongOrNull() ?: return
+        val convoId = _uiState.value.activeChatId ?: return
+        val contactId = convoId.toLongOrNull() ?: return
         viewModelScope.launch(Dispatchers.IO) {
             runAction {
                 networkRepo()?.attachTag(contactId, tagId)
-                setActionStatus("Tag attached")
+                val conversations = repository.getConversations()
+                val activeMessages = if (_uiState.value.activeChatId == convoId) {
+                    repository.getMessages(convoId)
+                } else {
+                    _uiState.value.activeMessages
+                }
+                _uiState.value = _uiState.value.copy(
+                    conversations = conversations,
+                    activeMessages = activeMessages,
+                    actionStatus = "Tag attached"
+                )
             }
         }
     }
 
     fun detachTagFromCurrentChat(tagId: Long) {
-        val contactId = _uiState.value.activeChatId?.toLongOrNull() ?: return
+        val convoId = _uiState.value.activeChatId ?: return
+        val contactId = convoId.toLongOrNull() ?: return
         viewModelScope.launch(Dispatchers.IO) {
             runAction {
                 networkRepo()?.detachTag(contactId, tagId)
-                setActionStatus("Tag detached")
+                val conversations = repository.getConversations()
+                val activeMessages = if (_uiState.value.activeChatId == convoId) {
+                    repository.getMessages(convoId)
+                } else {
+                    _uiState.value.activeMessages
+                }
+                _uiState.value = _uiState.value.copy(
+                    conversations = conversations,
+                    activeMessages = activeMessages,
+                    actionStatus = "Tag detached"
+                )
             }
         }
     }
@@ -424,6 +455,31 @@ class AppViewModel(
                 val custom = JSONObject().put(fieldId, fieldValue)
                 networkRepo()?.syncContactCustomFields(contactId, custom)
                 setActionStatus("Custom field synced")
+            }
+        }
+    }
+
+    fun refreshCurrentContactCustomFields() {
+        val contactId = _uiState.value.activeChatId?.toLongOrNull() ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val payload = networkRepo()?.getContactCustomFields(contactId)
+                val parsed = parseAvailableCustomFields(payload)
+                _uiState.value = _uiState.value.copy(availableCustomFields = parsed)
+            } catch (e: ApiHttpException) {
+                _uiState.value = _uiState.value.copy(
+                    availableCustomFields = emptyList(),
+                    actionStatus = if (e.statusCode == 401) {
+                        "Session expired. Please login again."
+                    } else {
+                        "Failed: unable to load custom fields"
+                    }
+                )
+            } catch (_: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    availableCustomFields = emptyList(),
+                    actionStatus = "Failed: unable to load custom fields"
+                )
             }
         }
     }
@@ -477,6 +533,7 @@ class AppViewModel(
                 repo.getFlows()
                 repo.getAgents()
                 refreshAvailableTags()
+                refreshAvailableAgents()
                 setActionStatus("Support data synced")
             }
         }
@@ -749,11 +806,123 @@ class AppViewModel(
         }
     }
 
-    private suspend fun refreshAvailableTags() {
-        val tags = networkRepo()?.listAvailableTags().orEmpty()
-        if (tags.isNotEmpty()) {
-            _uiState.value = _uiState.value.copy(availableTags = tags)
+    fun refreshAvailableTags() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                refreshAvailableTagsInternal()
+            } catch (_: Exception) {
+                _uiState.value = _uiState.value.copy(availableTags = emptyList())
+            }
         }
+    }
+
+    private suspend fun refreshAvailableTagsInternal() {
+        val tags = networkRepo()?.listAvailableTags().orEmpty()
+        _uiState.value = _uiState.value.copy(availableTags = tags)
+    }
+
+    fun refreshAvailableAgents() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                refreshAvailableAgentsInternal()
+            } catch (_: Exception) {
+                _uiState.value = _uiState.value.copy(availableAgents = emptyList())
+            }
+        }
+    }
+
+    private suspend fun refreshAvailableAgentsInternal() {
+        val payload = networkRepo()?.getAgents()
+        val parsed = parseAvailableAgents(payload)
+        _uiState.value = _uiState.value.copy(availableAgents = parsed)
+    }
+
+    private fun parseAvailableAgents(payload: JSONObject?): List<AvailableAgent> {
+        val items = payload?.optJSONArray("agents")
+            ?: payload?.optJSONArray("data")
+            ?: payload?.optJSONArray("rows")
+            ?: payload?.optJSONArray("result")
+            ?: return emptyList()
+        val parsed = buildList {
+            for (i in 0 until items.length()) {
+                val item = items.optJSONObject(i) ?: continue
+                val id = sequenceOf("id", "agent_id", "user_id")
+                    .mapNotNull { key -> item.opt(key)?.toString()?.toLongOrNull() }
+                    .firstOrNull()
+                    ?: continue
+                val name = sequenceOf("name", "full_name", "username")
+                    .map { key -> item.optString(key).trim() }
+                    .firstOrNull { it.isNotBlank() }
+                    ?: continue
+                add(AvailableAgent(id = id, name = name))
+            }
+        }
+        return parsed.distinctBy { it.id }
+    }
+
+    private fun parseAvailableCustomFields(payload: JSONObject?): List<AvailableCustomField> {
+        if (payload == null) return emptyList()
+        val result = mutableListOf<AvailableCustomField>()
+        val seen = mutableSetOf<String>()
+
+        fun addField(idRaw: String?, labelRaw: String?, valueRaw: String?) {
+            val id = idRaw?.trim().orEmpty()
+            if (id.isEmpty() || !seen.add(id)) return
+            val label = labelRaw?.trim().takeUnless { it.isNullOrEmpty() } ?: id
+            result += AvailableCustomField(id = id, label = label, value = valueRaw?.trim()?.takeIf { it.isNotEmpty() })
+        }
+
+        fun parseArray(array: org.json.JSONArray?) {
+            if (array == null) return
+            for (i in 0 until array.length()) {
+                val item = array.optJSONObject(i) ?: continue
+                val id = sequenceOf("id", "field_id", "key", "name")
+                    .mapNotNull { key -> item.opt(key)?.toString()?.trim() }
+                    .firstOrNull { it.isNotEmpty() }
+                val label = sequenceOf("label", "name", "title", "key")
+                    .map { key -> item.optString(key).trim() }
+                    .firstOrNull { it.isNotEmpty() }
+                val value = sequenceOf("value", "field_value", "current", "default")
+                    .map { key -> item.opt(key)?.toString()?.trim() }
+                    .firstOrNull { !it.isNullOrEmpty() }
+                addField(id, label, value)
+            }
+        }
+
+        fun parseObjectMap(obj: JSONObject?) {
+            if (obj == null) return
+            val keys = obj.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                val raw = obj.opt(key)
+                when (raw) {
+                    is JSONObject -> {
+                        val id = sequenceOf("id", "field_id", "key").mapNotNull { raw.opt(it)?.toString() }.firstOrNull() ?: key
+                        val label = sequenceOf("label", "name", "title", "key").map { raw.optString(it).trim() }.firstOrNull { it.isNotEmpty() } ?: key
+                        val value = sequenceOf("value", "field_value", "current", "default")
+                            .map { raw.opt(it)?.toString()?.trim() }
+                            .firstOrNull { !it.isNullOrEmpty() }
+                        addField(id, label, value)
+                    }
+                    else -> addField(key, key, raw?.toString())
+                }
+            }
+        }
+
+        parseArray(payload.optJSONArray("fields"))
+        parseArray(payload.optJSONArray("custom_fields"))
+        parseArray(payload.optJSONArray("data"))
+        parseArray(payload.optJSONArray("rows"))
+        parseArray(payload.optJSONArray("result"))
+        val dataObj = payload.optJSONObject("data")
+        parseArray(dataObj?.optJSONArray("fields"))
+        parseArray(dataObj?.optJSONArray("custom_fields"))
+        parseObjectMap(payload.optJSONObject("custom"))
+        parseObjectMap(payload.optJSONObject("fields"))
+        parseObjectMap(dataObj?.optJSONObject("custom"))
+        parseObjectMap(dataObj?.optJSONObject("fields"))
+
+        return result
     }
 
     private fun networkRepo(): NetworkChatRepository? = repository as? NetworkChatRepository

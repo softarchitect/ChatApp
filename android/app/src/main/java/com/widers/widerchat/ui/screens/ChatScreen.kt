@@ -23,6 +23,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.animation.core.LinearEasing
@@ -39,6 +40,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -72,6 +74,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -79,6 +82,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -119,6 +123,9 @@ import androidx.compose.ui.window.DialogProperties
 import com.widers.widerchat.core.TextKey
 import com.widers.widerchat.core.tr
 import com.widers.widerchat.domain.model.AppLocale
+import com.widers.widerchat.domain.model.AvailableAgent
+import com.widers.widerchat.domain.model.AvailableCustomField
+import com.widers.widerchat.domain.model.AvailableTag
 import com.widers.widerchat.domain.model.ChatMessage
 import com.widers.widerchat.domain.model.Conversation
 import com.widers.widerchat.domain.model.ConversationStatus
@@ -147,6 +154,12 @@ fun ChatScreen(
     onSendVoice: (String, ByteArray) -> Unit,
     onAddNote: (String) -> Unit,
     onToggleStatus: () -> Unit,
+    availableAgents: List<AvailableAgent>,
+    onRefreshAgents: () -> Unit,
+    availableTags: List<AvailableTag>,
+    onRefreshTags: () -> Unit,
+    availableCustomFields: List<AvailableCustomField>,
+    onRefreshCustomFields: () -> Unit,
     onAssignAgent: (Long) -> Unit,
     onUnassignAgent: () -> Unit,
     onMute: (Boolean) -> Unit,
@@ -190,12 +203,13 @@ fun ChatScreen(
     var noteText by remember { mutableStateOf("") }
     var showNote by remember { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
-    var agentInput by remember { mutableStateOf("") }
-    var tagInput by remember { mutableStateOf("") }
+    var agentSearch by remember { mutableStateOf("") }
+    var tagSearch by remember { mutableStateOf("") }
     var templateInput by remember { mutableStateOf("") }
     var flowInput by remember { mutableStateOf("") }
     var customFieldId by remember { mutableStateOf("") }
     var customFieldValue by remember { mutableStateOf("") }
+    var customFieldSearch by remember { mutableStateOf("") }
     var showAssignDialog by remember { mutableStateOf(false) }
     var showTagDialog by remember { mutableStateOf(false) }
     var showTemplateDialog by remember { mutableStateOf(false) }
@@ -468,6 +482,8 @@ fun ChatScreen(
                         text = { Text(tr(locale, TextKey.ASSIGN_AGENT)) },
                         onClick = {
                             showAssignDialog = true
+                            onRefreshAgents()
+                            agentSearch = ""
                             menuOpen = false
                         }
                     )
@@ -510,6 +526,8 @@ fun ChatScreen(
                         text = { Text(tr(locale, TextKey.ATTACH_DETACH_TAG)) },
                         onClick = {
                             showTagDialog = true
+                            onRefreshTags()
+                            tagSearch = ""
                             menuOpen = false
                         }
                     )
@@ -531,6 +549,8 @@ fun ChatScreen(
                         text = { Text(tr(locale, TextKey.SYNC_CUSTOM_FIELD)) },
                         onClick = {
                             showCustomDialog = true
+                            customFieldSearch = ""
+                            onRefreshCustomFields()
                             menuOpen = false
                         }
                     )
@@ -941,43 +961,177 @@ fun ChatScreen(
     }
 
     if (showAssignDialog) {
+        val q = agentSearch.trim().lowercase()
+        val filteredAgents = if (q.isBlank()) {
+            availableAgents
+        } else {
+            availableAgents.filter { it.name.lowercase().contains(q) || it.id.toString().contains(q) }
+        }
         AlertDialog(
-            onDismissRequest = { showAssignDialog = false },
+            onDismissRequest = {
+                showAssignDialog = false
+                agentSearch = ""
+            },
             title = { Text(tr(locale, TextKey.ASSIGN_AGENT_TITLE)) },
             text = {
-                OutlinedTextField(value = agentInput, onValueChange = { agentInput = it }, label = { Text(tr(locale, TextKey.AGENT_ID)) })
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 360.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    OutlinedTextField(
+                        value = agentSearch,
+                        onValueChange = { agentSearch = it },
+                        singleLine = true,
+                        label = { Text(if (locale == AppLocale.AR) "بحث الوكلاء" else "Search agents") }
+                    )
+                    if (filteredAgents.isEmpty()) {
+                        Text(
+                            if (locale == AppLocale.AR) "لا يوجد وكلاء." else "No agents found.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        filteredAgents.forEach { agent ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        onAssignAgent(agent.id)
+                                        showAssignDialog = false
+                                        agentSearch = ""
+                                    }
+                                    .padding(vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(agent.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(
+                                    "#${agent.id}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
+                        }
+                    }
+                }
             },
-            dismissButton = { TextButton(onClick = { showAssignDialog = false }) { Text(tr(locale, TextKey.CANCEL)) } },
-            confirmButton = {
-                TextButton(onClick = {
-                    agentInput.toLongOrNull()?.let(onAssignAgent)
-                    showAssignDialog = false
-                    agentInput = ""
-                }) { Text(tr(locale, TextKey.ASSIGN_AGENT)) }
-            }
+            dismissButton = { TextButton(onClick = { showAssignDialog = false; agentSearch = "" }) { Text(tr(locale, TextKey.CANCEL)) } },
+            confirmButton = {}
         )
     }
 
     if (showTagDialog) {
-        AlertDialog(
-            onDismissRequest = { showTagDialog = false },
-            title = { Text(tr(locale, TextKey.ATTACH_DETACH_TAG_TITLE)) },
-            text = { OutlinedTextField(value = tagInput, onValueChange = { tagInput = it }, label = { Text(tr(locale, TextKey.TAG_ID)) }) },
-            dismissButton = { TextButton(onClick = { showTagDialog = false }) { Text(tr(locale, TextKey.CANCEL)) } },
-            confirmButton = {
-                Row {
-                    TextButton(onClick = {
-                        tagInput.toLongOrNull()?.let(onAttachTag)
-                        showTagDialog = false
-                        tagInput = ""
-                    }) { Text(tr(locale, TextKey.ATTACH)) }
-                    TextButton(onClick = {
-                        tagInput.toLongOrNull()?.let(onDetachTag)
-                        showTagDialog = false
-                        tagInput = ""
-                    }) { Text(tr(locale, TextKey.DETACH)) }
-                }
+        val attachedTagIds = conversation.tags.map { it.id }.toSet()
+        val q = tagSearch.trim().lowercase()
+        val filteredTags = if (q.isBlank()) {
+            availableTags
+        } else {
+            availableTags.filter { tag ->
+                tag.name.lowercase().contains(q) || tag.id.toString().contains(q)
             }
+        }
+        AlertDialog(
+            onDismissRequest = {
+                showTagDialog = false
+                tagSearch = ""
+            },
+            title = { Text(tr(locale, TextKey.ATTACH_DETACH_TAG_TITLE)) },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    OutlinedTextField(
+                        value = tagSearch,
+                        onValueChange = { tagSearch = it },
+                        singleLine = true,
+                        label = { Text(if (locale == AppLocale.AR) "بحث الوسوم" else "Search tags") }
+                    )
+
+                    if (conversation.tags.isNotEmpty()) {
+                        Text(
+                            if (locale == AppLocale.AR) "الوسوم الحالية:" else "Attached tags:",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            conversation.tags.forEach { tag ->
+                                Surface(
+                                    shape = RoundedCornerShape(999.dp),
+                                    color = parseTagHexColor(tag.colorHex),
+                                    modifier = Modifier.clickable { onDetachTag(tag.id) }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(tag.name, style = MaterialTheme.typography.labelSmall, color = Color.White)
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("×", style = MaterialTheme.typography.labelSmall, color = Color.White)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (filteredTags.isEmpty()) {
+                        Text(
+                            if (locale == AppLocale.AR) "لا توجد نتائج." else "No results.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        filteredTags.forEach { tag ->
+                            val isAttached = attachedTagIds.contains(tag.id)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        if (isAttached) onDetachTag(tag.id) else onAttachTag(tag.id)
+                                    }
+                                    .padding(vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(10.dp)
+                                            .clip(CircleShape)
+                                            .background(parseTagHexColor(tag.colorHex))
+                                    )
+                                    Text(tag.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                                Text(
+                                    if (isAttached) {
+                                        if (locale == AppLocale.AR) "مرفق" else "Attached"
+                                    } else {
+                                        "#${tag.id}"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (isAttached) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
+                        }
+                    }
+                }
+            },
+            dismissButton = { TextButton(onClick = { showTagDialog = false; tagSearch = "" }) { Text(tr(locale, TextKey.CLOSE)) } },
+            confirmButton = {}
         )
     }
 
@@ -1014,24 +1168,83 @@ fun ChatScreen(
     }
 
     if (showCustomDialog) {
+        val q = customFieldSearch.trim().lowercase()
+        val filteredCustomFields = if (q.isBlank()) {
+            availableCustomFields
+        } else {
+            availableCustomFields.filter { field ->
+                field.label.lowercase().contains(q) || field.id.lowercase().contains(q)
+            }
+        }
         AlertDialog(
-            onDismissRequest = { showCustomDialog = false },
+            onDismissRequest = {
+                showCustomDialog = false
+                customFieldSearch = ""
+            },
             title = { Text(tr(locale, TextKey.SYNC_CUSTOM_FIELD_TITLE)) },
             text = {
-                Column {
-                    OutlinedTextField(value = customFieldId, onValueChange = { customFieldId = it }, label = { Text(tr(locale, TextKey.FIELD_ID)) })
-                    Spacer(Modifier.size(8.dp))
-                    OutlinedTextField(value = customFieldValue, onValueChange = { customFieldValue = it }, label = { Text(tr(locale, TextKey.FIELD_VALUE)) })
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    OutlinedTextField(
+                        value = customFieldSearch,
+                        onValueChange = { customFieldSearch = it },
+                        singleLine = true,
+                        label = { Text(if (locale == AppLocale.AR) "بحث الحقول" else "Search fields") }
+                    )
+                    if (filteredCustomFields.isNotEmpty()) {
+                        filteredCustomFields.forEach { field ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        customFieldId = field.id
+                                        if (customFieldValue.isBlank()) {
+                                            customFieldValue = field.value.orEmpty()
+                                        }
+                                    }
+                                    .padding(vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(field.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(
+                                    "#${field.id}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
+                        }
+                    }
+                    OutlinedTextField(
+                        value = customFieldId,
+                        onValueChange = { customFieldId = it },
+                        singleLine = true,
+                        label = { Text(tr(locale, TextKey.FIELD_ID)) }
+                    )
+                    OutlinedTextField(
+                        value = customFieldValue,
+                        onValueChange = { customFieldValue = it },
+                        singleLine = true,
+                        label = { Text(tr(locale, TextKey.FIELD_VALUE)) }
+                    )
                 }
             },
-            dismissButton = { TextButton(onClick = { showCustomDialog = false }) { Text(tr(locale, TextKey.CANCEL)) } },
+            dismissButton = { TextButton(onClick = { showCustomDialog = false; customFieldSearch = "" }) { Text(tr(locale, TextKey.CANCEL)) } },
             confirmButton = {
                 TextButton(onClick = {
-                    onSyncCustomField(customFieldId, customFieldValue)
+                    if (customFieldId.isNotBlank()) {
+                        onSyncCustomField(customFieldId, customFieldValue)
+                    }
                     showCustomDialog = false
                     customFieldId = ""
                     customFieldValue = ""
-                }) { Text(tr(locale, TextKey.SYNC)) }
+                    customFieldSearch = ""
+                }, enabled = customFieldId.isNotBlank()) { Text(tr(locale, TextKey.SYNC)) }
             }
         )
     }
@@ -2315,6 +2528,17 @@ private fun emojiMatchesSearch(emoji: String, query: String, locale: AppLocale):
     }
     val keywords = if (locale == AppLocale.AR) arKeywords + enKeywords else enKeywords + arKeywords
     return keywords.any { it.contains(query) || query.contains(it) }
+}
+
+private fun parseTagHexColor(raw: String): Color {
+    val hex = raw.trim().removePrefix("#")
+    return runCatching {
+        when (hex.length) {
+            6 -> Color(android.graphics.Color.parseColor("#$hex"))
+            8 -> Color(android.graphics.Color.parseColor("#$hex"))
+            else -> Color(0xFF64748B)
+        }
+    }.getOrElse { Color(0xFF64748B) }
 }
 
 private fun openDialer(context: android.content.Context, rawPhone: String?): Boolean {

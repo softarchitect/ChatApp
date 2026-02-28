@@ -66,6 +66,17 @@ data class AvailableTag(
     val colorHex: String = "#64748B"
 )
 
+data class AvailableAgent(
+    val id: Long,
+    val name: String
+)
+
+data class AvailableCustomField(
+    val id: String,
+    val label: String,
+    val value: String? = null
+)
+
 data class ChatMessage(
     val id: String,
     val conversationId: String,
