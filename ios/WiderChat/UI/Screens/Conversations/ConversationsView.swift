@@ -210,87 +210,93 @@ struct ConversationsView: View {
                 .padding(.top, 42)
                 Spacer()
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(filtered) { convo in
-                            ConversationRow(
-                                conversation: convo,
-                                locale: vm.locale,
-                                isSelected: selectedConversationIds.contains(convo.id),
-                                selectionMode: selectionMode,
-                                onTap: {
-                                    if selectionMode {
-                                        if selectedConversationIds.contains(convo.id) {
-                                            selectedConversationIds.remove(convo.id)
-                                        } else {
-                                            selectedConversationIds.insert(convo.id)
-                                        }
-                                    } else {
-                                        vm.openChat(id: convo.id)
-                                    }
-                                },
-                                onLongPress: {
+                List {
+                    ForEach(filtered) { convo in
+                        let baseRow = ConversationRow(
+                            conversation: convo,
+                            locale: vm.locale,
+                            isSelected: selectedConversationIds.contains(convo.id),
+                            selectionMode: selectionMode,
+                            onTap: {
+                                if selectionMode {
                                     if selectedConversationIds.contains(convo.id) {
                                         selectedConversationIds.remove(convo.id)
                                     } else {
                                         selectedConversationIds.insert(convo.id)
                                     }
-                                },
-                                onQuickAddTag: {
-                                    tagPickerConversationId = convo.id
-                                    Task { await vm.refreshAvailableTags() }
-                                },
-                                onQuickMarkRead: {
-                                    vm.markConversationRead(conversationId: convo.id, read: true)
-                                },
-                                onTagInfo: { tag in
-                                    tagManageContext = TagManageContext(conversationId: convo.id, tag: tag)
+                                } else {
+                                    vm.openChat(id: convo.id)
                                 }
-                            )
-                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                Button {
-                                    vm.markConversationRead(conversationId: convo.id, read: convo.unreadCount > 0)
-                                } label: {
-                                    Label(
-                                        convo.unreadCount > 0
-                                            ? (vm.locale == .ar ? "تحديد كمقروء" : "Mark read")
-                                            : (vm.locale == .ar ? "تحديد كغير مقروء" : "Mark unread"),
-                                        systemImage: convo.unreadCount > 0 ? "checkmark.circle" : "envelope.badge"
-                                    )
+                            },
+                            onLongPress: {
+                                if selectedConversationIds.contains(convo.id) {
+                                    selectedConversationIds.remove(convo.id)
+                                } else {
+                                    selectedConversationIds.insert(convo.id)
                                 }
-                                .tint(.blue)
+                            },
+                            onQuickAddTag: {
+                                tagPickerConversationId = convo.id
+                                Task { await vm.refreshAvailableTags() }
+                            },
+                            onQuickMarkRead: {
+                                vm.markConversationRead(conversationId: convo.id, read: true)
+                            },
+                            onTagInfo: { tag in
+                                tagManageContext = TagManageContext(conversationId: convo.id, tag: tag)
+                            }
+                        )
 
-                                Button {
-                                    vm.toggleConversationStatus(conversationId: convo.id)
-                                } label: {
-                                    Label(
-                                        convo.status == .open
-                                            ? (vm.locale == .ar ? "إغلاق" : "Close")
-                                            : (vm.locale == .ar ? "إعادة فتح" : "Reopen"),
-                                        systemImage: convo.status == .open ? "archivebox" : "arrow.uturn.backward.circle"
-                                    )
+                        if selectionMode {
+                            baseRow
+                                .listRowInsets(EdgeInsets())
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(AppPalette.surface)
+                        } else {
+                            baseRow
+                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                    Button {
+                                        vm.markConversationRead(conversationId: convo.id, read: convo.unreadCount > 0)
+                                    } label: {
+                                        Label(
+                                            convo.unreadCount > 0
+                                                ? (vm.locale == .ar ? "تحديد كمقروء" : "Mark read")
+                                                : (vm.locale == .ar ? "تحديد كغير مقروء" : "Mark unread"),
+                                            systemImage: convo.unreadCount > 0 ? "checkmark.circle" : "envelope.badge"
+                                        )
+                                    }
+                                    .tint(.blue)
+
+                                    Button {
+                                        vm.toggleConversationStatus(conversationId: convo.id)
+                                    } label: {
+                                        Label(
+                                            convo.status == .open
+                                                ? (vm.locale == .ar ? "إغلاق" : "Close")
+                                                : (vm.locale == .ar ? "إعادة فتح" : "Reopen"),
+                                            systemImage: convo.status == .open ? "archivebox" : "arrow.uturn.backward.circle"
+                                        )
+                                    }
+                                    .tint(convo.status == .open ? .orange : .green)
                                 }
-                                .tint(convo.status == .open ? .orange : .green)
-                            }
-                            .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                                Button {
-                                    quickActionsConversation = convo
-                                    Task { await vm.refreshAvailableTags() }
-                                } label: {
-                                    Label(vm.locale == .ar ? "إجراءات" : "Actions", systemImage: "ellipsis.circle")
+                                .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                                    Button {
+                                        quickActionsConversation = convo
+                                        Task { await vm.refreshAvailableTags() }
+                                    } label: {
+                                        Label(vm.locale == .ar ? "إجراءات" : "Actions", systemImage: "ellipsis.circle")
+                                    }
+                                    .tint(AppPalette.primary)
                                 }
-                                .tint(AppPalette.primary)
-                            }
-                            .overlay(alignment: .bottom) {
-                                Divider()
-                                    .overlay(AppPalette.border.opacity(0.6))
-                                    .padding(.leading, 72)
-                                    .padding(.trailing, 16)
-                            }
+                                .listRowInsets(EdgeInsets())
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(AppPalette.surface)
                         }
                     }
-                    .padding(.bottom, 12)
                 }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .background(AppPalette.surface)
             }
         }
         .alert(vm.locale == .ar ? "إزالة المحادثات المحددة؟" : "Remove selected conversations?", isPresented: $showRemoveConfirm) {
