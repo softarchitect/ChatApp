@@ -1639,8 +1639,8 @@ private struct VideoListThumbnail: View {
                 let generator = AVAssetImageGenerator(asset: asset)
                 generator.appliesPreferredTrackTransform = true
                 let time = CMTime(seconds: 0.2, preferredTimescale: 600)
-                generator.generateCGImageAsynchronously(for: time) { _, cgImage, _, result, _ in
-                    if result == .succeeded, let cgImage {
+                generator.generateCGImageAsynchronously(for: time) { cgImage, _, error in
+                    if let cgImage, error == nil {
                         continuation.resume(returning: UIImage(cgImage: cgImage))
                     } else {
                         continuation.resume(returning: nil)
