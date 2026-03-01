@@ -21,12 +21,8 @@ struct ChatView: View {
     @State private var agentSearch = ""
     @State private var tagSearch = ""
     @State private var templateSearch = ""
-    @State private var templateSearchDebounced = ""
-    @State private var templateSearchTask: Task<Void, Never>?
     @State private var templateInput = ""
     @State private var flowSearch = ""
-    @State private var flowSearchDebounced = ""
-    @State private var flowSearchTask: Task<Void, Never>?
     @State private var flowInput = ""
     @State private var customFieldId = ""
     @State private var customFieldValue = ""
@@ -124,15 +120,12 @@ struct ChatView: View {
                     Button(tr(vm.locale, .sendTemplate)) {
                         showTemplateDialog = true
                         templateSearch = ""
-                        templateSearchDebounced = ""
                         templateInput = ""
-                        templateSearchTask?.cancel()
                         Task { await vm.refreshAvailableTemplates() }
                     }
                     Button(tr(vm.locale, .sendFlow)) {
                         showFlowDialog = true
                         flowSearch = ""
-                        flowSearchDebounced = ""
                         flowInput = ""
                         Task { await vm.refreshAvailableFlows() }
                     }
@@ -640,7 +633,7 @@ struct ChatView: View {
         }
         .sheet(isPresented: $showTemplateDialog) {
             NavigationStack {
-                let q = templateSearchDebounced.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                let q = templateSearch.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                 let filteredTemplates = q.isEmpty
                     ? vm.availableTemplates
                     : vm.availableTemplates.filter {
@@ -663,8 +656,6 @@ struct ChatView: View {
                             showTemplateDialog = false
                             templateInput = ""
                             templateSearch = ""
-                            templateSearchDebounced = ""
-                            templateSearchTask?.cancel()
                         } label: {
                             Text(tr(vm.locale, .send))
                                 .font(.system(size: 14, weight: .semibold))
@@ -689,8 +680,6 @@ struct ChatView: View {
                                     showTemplateDialog = false
                                     templateInput = ""
                                     templateSearch = ""
-                                    templateSearchDebounced = ""
-                                    templateSearchTask?.cancel()
                                 } label: {
                                     HStack(spacing: 8) {
                                         Text(template.name)
@@ -713,9 +702,6 @@ struct ChatView: View {
                     placement: .navigationBarDrawer(displayMode: .always),
                     prompt: vm.locale == .ar ? "بحث القوالب" : "Search templates"
                 )
-                .onChange(of: templateSearch) { _, newValue in
-                    scheduleTemplateSearchDebounce(newValue)
-                }
                 .navigationTitle(tr(vm.locale, .sendTemplateTitle))
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -723,20 +709,15 @@ struct ChatView: View {
                             showTemplateDialog = false
                             templateInput = ""
                             templateSearch = ""
-                            templateSearchDebounced = ""
-                            templateSearchTask?.cancel()
                         }
                     }
-                }
-                .onDisappear {
-                    templateSearchTask?.cancel()
                 }
             }
             .presentationDetents([.medium, .large])
         }
         .sheet(isPresented: $showFlowDialog) {
             NavigationStack {
-                let q = flowSearchDebounced.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                let q = flowSearch.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                 let filteredFlows = q.isEmpty
                     ? vm.availableFlows
                     : vm.availableFlows.filter {
@@ -759,8 +740,6 @@ struct ChatView: View {
                             showFlowDialog = false
                             flowInput = ""
                             flowSearch = ""
-                            flowSearchDebounced = ""
-                            flowSearchTask?.cancel()
                         } label: {
                             Text(tr(vm.locale, .send))
                                 .font(.system(size: 14, weight: .semibold))
@@ -785,8 +764,6 @@ struct ChatView: View {
                                     showFlowDialog = false
                                     flowInput = ""
                                     flowSearch = ""
-                                    flowSearchDebounced = ""
-                                    flowSearchTask?.cancel()
                                 } label: {
                                     HStack(spacing: 8) {
                                         Text(flow.name)
@@ -809,9 +786,6 @@ struct ChatView: View {
                     placement: .navigationBarDrawer(displayMode: .always),
                     prompt: vm.locale == .ar ? "بحث التدفقات" : "Search flows"
                 )
-                .onChange(of: flowSearch) { _, newValue in
-                    scheduleFlowSearchDebounce(newValue)
-                }
                 .navigationTitle(tr(vm.locale, .sendFlowTitle))
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -819,13 +793,8 @@ struct ChatView: View {
                             showFlowDialog = false
                             flowInput = ""
                             flowSearch = ""
-                            flowSearchDebounced = ""
-                            flowSearchTask?.cancel()
                         }
                     }
-                }
-                .onDisappear {
-                    flowSearchTask?.cancel()
                 }
             }
             .presentationDetents([.medium, .large])
@@ -1544,37 +1513,6 @@ private struct MediaLinksDocsSheet: View {
         }
     }
 
-    private func scheduleTemplateSearchDebounce(_ raw: String) {
-        templateSearchTask?.cancel()
-        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty else {
-            templateSearchDebounced = ""
-            return
-        }
-        templateSearchTask = Task {
-            try? await Task.sleep(nanoseconds: 250_000_000)
-            guard !Task.isCancelled else { return }
-            await MainActor.run {
-                templateSearchDebounced = raw
-            }
-        }
-    }
-
-    private func scheduleFlowSearchDebounce(_ raw: String) {
-        flowSearchTask?.cancel()
-        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty else {
-            flowSearchDebounced = ""
-            return
-        }
-        flowSearchTask = Task {
-            try? await Task.sleep(nanoseconds: 250_000_000)
-            guard !Task.isCancelled else { return }
-            await MainActor.run {
-                flowSearchDebounced = raw
-            }
-        }
-    }
 }
 
 private func tagAccentColor(hex: String?) -> Color {
