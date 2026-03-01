@@ -714,18 +714,7 @@ struct ChatView: View {
                     prompt: vm.locale == .ar ? "بحث القوالب" : "Search templates"
                 )
                 .onChange(of: templateSearch) { _, newValue in
-                    templateSearchTask?.cancel()
-                    if newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        templateSearchDebounced = ""
-                        return
-                    }
-                    templateSearchTask = Task {
-                        try? await Task.sleep(nanoseconds: 250_000_000)
-                        guard !Task.isCancelled else { return }
-                        await MainActor.run {
-                            templateSearchDebounced = newValue
-                        }
-                    }
+                    scheduleTemplateSearchDebounce(newValue)
                 }
                 .navigationTitle(tr(vm.locale, .sendTemplateTitle))
                 .toolbar {
@@ -821,18 +810,7 @@ struct ChatView: View {
                     prompt: vm.locale == .ar ? "بحث التدفقات" : "Search flows"
                 )
                 .onChange(of: flowSearch) { _, newValue in
-                    flowSearchTask?.cancel()
-                    if newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        flowSearchDebounced = ""
-                        return
-                    }
-                    flowSearchTask = Task {
-                        try? await Task.sleep(nanoseconds: 250_000_000)
-                        guard !Task.isCancelled else { return }
-                        await MainActor.run {
-                            flowSearchDebounced = newValue
-                        }
-                    }
+                    scheduleFlowSearchDebounce(newValue)
                 }
                 .navigationTitle(tr(vm.locale, .sendFlowTitle))
                 .toolbar {
@@ -1566,28 +1544,60 @@ private struct MediaLinksDocsSheet: View {
         }
     }
 
-    private func tagAccentColor(hex: String?) -> Color {
-        guard var hex else { return Color(red: 0.39, green: 0.45, blue: 0.55) }
-        hex = hex.trimmingCharacters(in: .whitespacesAndNewlines)
-        if hex.hasPrefix("#") { hex.removeFirst() }
-        guard let value = UInt64(hex, radix: 16) else { return Color(red: 0.39, green: 0.45, blue: 0.55) }
-        switch hex.count {
-        case 6:
-            return Color(
-                red: Double((value >> 16) & 0xFF) / 255.0,
-                green: Double((value >> 8) & 0xFF) / 255.0,
-                blue: Double(value & 0xFF) / 255.0
-            )
-        case 8:
-            return Color(
-                red: Double((value >> 24) & 0xFF) / 255.0,
-                green: Double((value >> 16) & 0xFF) / 255.0,
-                blue: Double((value >> 8) & 0xFF) / 255.0,
-                opacity: Double(value & 0xFF) / 255.0
-            )
-        default:
-            return Color(red: 0.39, green: 0.45, blue: 0.55)
+    private func scheduleTemplateSearchDebounce(_ raw: String) {
+        templateSearchTask?.cancel()
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else {
+            templateSearchDebounced = ""
+            return
         }
+        templateSearchTask = Task {
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                templateSearchDebounced = raw
+            }
+        }
+    }
+
+    private func scheduleFlowSearchDebounce(_ raw: String) {
+        flowSearchTask?.cancel()
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else {
+            flowSearchDebounced = ""
+            return
+        }
+        flowSearchTask = Task {
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                flowSearchDebounced = raw
+            }
+        }
+    }
+}
+
+private func tagAccentColor(hex: String?) -> Color {
+    guard var hex else { return Color(red: 0.39, green: 0.45, blue: 0.55) }
+    hex = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+    if hex.hasPrefix("#") { hex.removeFirst() }
+    guard let value = UInt64(hex, radix: 16) else { return Color(red: 0.39, green: 0.45, blue: 0.55) }
+    switch hex.count {
+    case 6:
+        return Color(
+            red: Double((value >> 16) & 0xFF) / 255.0,
+            green: Double((value >> 8) & 0xFF) / 255.0,
+            blue: Double(value & 0xFF) / 255.0
+        )
+    case 8:
+        return Color(
+            red: Double((value >> 24) & 0xFF) / 255.0,
+            green: Double((value >> 16) & 0xFF) / 255.0,
+            blue: Double((value >> 8) & 0xFF) / 255.0,
+            opacity: Double(value & 0xFF) / 255.0
+        )
+    default:
+        return Color(red: 0.39, green: 0.45, blue: 0.55)
     }
 }
 
@@ -1629,11 +1639,12 @@ private struct VideoListThumbnail: View {
                 let generator = AVAssetImageGenerator(asset: asset)
                 generator.appliesPreferredTrackTransform = true
                 let time = CMTime(seconds: 0.2, preferredTimescale: 600)
-                do {
-                    let cgImage = try generator.copyCGImage(at: time, actualTime: nil)
-                    continuation.resume(returning: UIImage(cgImage: cgImage))
-                } catch {
-                    continuation.resume(returning: nil)
+                generator.generateCGImageAsynchronously(for: time) { _, cgImage, _, result, _ in
+                    if result == .succeeded, let cgImage {
+                        continuation.resume(returning: UIImage(cgImage: cgImage))
+                    } else {
+                        continuation.resume(returning: nil)
+                    }
                 }
             }
         }
