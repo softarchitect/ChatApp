@@ -9,6 +9,7 @@ import com.widers.widerchat.domain.model.AppScreen
 import com.widers.widerchat.domain.model.AvailableAgent
 import com.widers.widerchat.domain.model.AvailableCustomField
 import com.widers.widerchat.domain.model.AvailableFlow
+import com.widers.widerchat.domain.model.AvailableReply
 import com.widers.widerchat.domain.model.AvailableTag
 import com.widers.widerchat.domain.model.AvailableTemplate
 import com.widers.widerchat.domain.model.ChatMessage
@@ -45,6 +46,7 @@ data class AppUiState(
     val availableCustomFields: List<AvailableCustomField> = emptyList(),
     val availableTemplates: List<AvailableTemplate> = emptyList(),
     val availableFlows: List<AvailableFlow> = emptyList(),
+    val availableReplies: List<AvailableReply> = emptyList(),
     val screen: AppScreen = AppScreen.LOGIN,
     val activeChatId: String? = null,
     val conversations: List<Conversation> = emptyList(),
@@ -93,6 +95,7 @@ class AppViewModel(
                 refreshAvailableAgents()
                 refreshAvailableTemplates()
                 refreshAvailableFlows()
+                refreshAvailableReplies()
             } catch (_: Exception) {
                 _uiState.value = _uiState.value.copy(isLoading = false, loginError = true)
             }
@@ -126,6 +129,7 @@ class AppViewModel(
                 refreshAvailableAgents()
                 refreshAvailableTemplates()
                 refreshAvailableFlows()
+                refreshAvailableReplies()
             } catch (_: Exception) {
                 _uiState.value = _uiState.value.copy(isLoading = false, isLoggedIn = false, loginError = true)
             }
@@ -150,7 +154,8 @@ class AppViewModel(
             availableAgents = emptyList(),
             availableCustomFields = emptyList(),
             availableTemplates = emptyList(),
-            availableFlows = emptyList()
+            availableFlows = emptyList(),
+            availableReplies = emptyList()
         )
     }
 
@@ -457,6 +462,22 @@ class AppViewModel(
         }
     }
 
+    fun sendQuickReplyToCurrentChat(replyId: Long) {
+        val convoId = _uiState.value.activeChatId ?: return
+        val reply = _uiState.value.availableReplies.firstOrNull { it.id == replyId } ?: return
+        if (reply.text.isBlank()) return
+        sendMessage(reply.text)
+        _uiState.value = _uiState.value.copy(actionStatus = "Reply sent")
+        viewModelScope.launch(Dispatchers.IO) {
+            // Keep replies fresh in case backend-side text changed.
+            refreshAvailableReplies()
+            if (_uiState.value.activeChatId == convoId) {
+                val refreshed = mergeWithLocalOutgoing(convoId, repository.getMessages(convoId))
+                _uiState.value = _uiState.value.copy(activeMessages = refreshed)
+            }
+        }
+    }
+
     fun syncCurrentContactCustomField(fieldId: String, fieldValue: String) {
         val contactId = _uiState.value.activeChatId?.toLongOrNull() ?: return
         if (fieldId.isBlank()) return
@@ -546,6 +567,7 @@ class AppViewModel(
                 refreshAvailableAgents()
                 refreshAvailableTemplates()
                 refreshAvailableFlows()
+                refreshAvailableReplies()
                 setActionStatus("Support data synced")
             }
         }
@@ -564,8 +586,19 @@ class AppViewModel(
                     setActionStatus("Search completed")
                     return@runAction
                 }
-                val conversations = (repository.getConversations()).filter { convo ->
-                    convo.customerName.contains(keyword, ignoreCase = true) ||
+                val ids = buildSet {
+                    for (i in 0 until items.length()) {
+                        val item = items.optJSONObject(i) ?: continue
+                        val id = sequenceOf("contact_id", "id", "conversation_id")
+                            .mapNotNull { key -> item.opt(key)?.toString()?.trim() }
+                            .firstOrNull { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
+                            ?: continue
+                        add(id)
+                    }
+                }
+                val conversations = repository.getConversations().filter { convo ->
+                    convo.id in ids ||
+                        convo.customerName.contains(keyword, ignoreCase = true) ||
                         convo.lastMessage.contains(keyword, ignoreCase = true)
                 }
                 _uiState.value = _uiState.value.copy(conversations = conversations, actionStatus = "Search completed")
@@ -867,6 +900,18 @@ class AppViewModel(
         }
     }
 
+    fun refreshAvailableReplies() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val payload = networkRepo()?.getReplies()
+                val parsed = parseAvailableReplies(payload)
+                _uiState.value = _uiState.value.copy(availableReplies = parsed)
+            } catch (_: Exception) {
+                _uiState.value = _uiState.value.copy(availableReplies = emptyList())
+            }
+        }
+    }
+
     private suspend fun refreshAvailableAgentsInternal() {
         val payload = networkRepo()?.getAgents()
         val parsed = parseAvailableAgents(payload)
@@ -1014,6 +1059,39 @@ class AppViewModel(
                     .firstOrNull { it.isNotEmpty() }
                     ?: continue
                 add(AvailableFlow(id = id, name = name))
+            }
+        }
+        return parsed.distinctBy { it.id }
+    }
+
+    private fun parseAvailableReplies(payload: JSONObject?): List<AvailableReply> {
+        var items = payload?.optJSONArray("replies")
+            ?: payload?.optJSONArray("data")
+            ?: payload?.optJSONArray("rows")
+            ?: payload?.optJSONArray("result")
+        if (items == null) {
+            val dataObj = payload?.optJSONObject("data")
+            items = dataObj?.optJSONArray("replies")
+                ?: dataObj?.optJSONArray("rows")
+                ?: dataObj?.optJSONArray("result")
+        }
+        if (items == null) return emptyList()
+        val parsed = buildList {
+            for (i in 0 until items.length()) {
+                val item = items.optJSONObject(i) ?: continue
+                val id = sequenceOf("id", "reply_id")
+                    .mapNotNull { key -> item.opt(key)?.toString()?.toLongOrNull() }
+                    .firstOrNull()
+                    ?: continue
+                val name = sequenceOf("name", "title")
+                    .map { key -> item.optString(key).trim() }
+                    .firstOrNull { it.isNotEmpty() }
+                    ?: continue
+                val text = sequenceOf("text", "value", "message")
+                    .map { key -> item.optString(key).trim() }
+                    .firstOrNull { it.isNotEmpty() }
+                    ?: continue
+                add(AvailableReply(id = id, name = name, text = text))
             }
         }
         return parsed.distinctBy { it.id }

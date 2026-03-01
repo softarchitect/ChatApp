@@ -39,6 +39,12 @@ enum MockSeed {
     ]
 }
 
+struct AvailableReply: Identifiable {
+    let id: Int
+    let name: String
+    let text: String
+}
+
 final class AppViewModel: ObservableObject {
     private enum SessionKeys {
         static let token = "widers.session.token"
@@ -66,6 +72,7 @@ final class AppViewModel: ObservableObject {
     @Published var availableCustomFields: [AvailableCustomField] = []
     @Published var availableTemplates: [AvailableTemplate] = []
     @Published var availableFlows: [AvailableFlow] = []
+    @Published var availableReplies: [AvailableReply] = []
     @Published var profileName = ""
     @Published var profileEmail = ""
     private var localOutgoingByConversation: [String: [ChatMessage]] = [:]
@@ -104,6 +111,7 @@ final class AppViewModel: ObservableObject {
             await refreshAvailableAgents()
             await refreshAvailableTemplates()
             await refreshAvailableFlows()
+            await refreshAvailableReplies()
             let profile = repository.currentUserSnapshot()
             profileName = profile.name ?? ""
             profileEmail = profile.email ?? ""
@@ -134,6 +142,7 @@ final class AppViewModel: ObservableObject {
         availableCustomFields = []
         availableTemplates = []
         availableFlows = []
+        availableReplies = []
         secureStore.removeValue(for: SessionKeys.profileName)
         secureStore.removeValue(for: SessionKeys.profileEmail)
     }
@@ -452,6 +461,17 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    func sendQuickReplyToCurrentChat(replyId: Int) {
+        guard let reply = availableReplies.first(where: { $0.id == replyId }) else { return }
+        let text = reply.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        sendMessage(text)
+        actionStatus = "Reply sent"
+        Task { @MainActor in
+            await refreshAvailableReplies()
+        }
+    }
+
     func syncCurrentContactCustomField(fieldId: String, fieldValue: String) {
         guard let id = activeChatId, let contactId = Int(id), !fieldId.isEmpty else { return }
         Task { @MainActor in
@@ -513,6 +533,30 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    func updateCurrentContact(name: String, phone: String, email: String?) {
+        guard let id = activeChatId, let contactId = Int(id) else { return }
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedPhone = phone.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedEmail = email?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty, !trimmedPhone.isEmpty else { return }
+        Task { @MainActor in
+            isActionLoading = true
+            let result = await repository.updateContact(
+                contactId: contactId,
+                name: trimmedName,
+                phone: trimmedPhone,
+                email: (trimmedEmail?.isEmpty == true) ? nil : trimmedEmail
+            )
+            isActionLoading = false
+            guard result != nil else {
+                actionStatus = "Failed: unable to update contact"
+                return
+            }
+            conversations = await repository.getConversations()
+            actionStatus = "Contact updated"
+        }
+    }
+
     func preloadSupportData() {
         Task { @MainActor in
             isActionLoading = true
@@ -526,6 +570,7 @@ final class AppViewModel: ObservableObject {
             availableAgents = c6.map(parseAvailableAgents) ?? []
             availableTemplates = c2.map(parseAvailableTemplates) ?? []
             availableFlows = c5.map(parseAvailableFlows) ?? []
+            availableReplies = c4.map(parseAvailableReplies) ?? []
             isActionLoading = false
             let allOk = [c1, c2, c3, c4, c5, c6].allSatisfy { $0 != nil }
             actionStatus = allOk ? "Support data synced" : "Failed: support data sync incomplete"
@@ -665,7 +710,14 @@ final class AppViewModel: ObservableObject {
                 actionStatus = "Failed: search request"
                 return
             }
-            conversations = conversations.filter {
+            let ids: Set<String> = {
+                let rows = result?.firstArray(keys: ["data", "chats", "rows", "result"]) ?? []
+                let values = rows.compactMap { $0.firstString(keys: ["contact_id", "id", "conversation_id"]) }
+                return Set(values)
+            }()
+            let source = await repository.getConversations()
+            conversations = source.filter {
+                ids.contains($0.id) ||
                 $0.customerName.localizedCaseInsensitiveContains(keyword) ||
                 $0.lastMessage.localizedCaseInsensitiveContains(keyword)
             }
@@ -750,6 +802,14 @@ final class AppViewModel: ObservableObject {
         availableFlows = parseAvailableFlows(payload)
     }
 
+    func refreshAvailableReplies() async {
+        guard let payload = await repository.getRepliesList() else {
+            availableReplies = []
+            return
+        }
+        availableReplies = parseAvailableReplies(payload)
+    }
+
     private func parseAvailableTags(_ payload: [String: Any]) -> [AvailableTag] {
         let rows = payload.firstArray(keys: ["tags", "data", "rows", "result"])
         var seen = Set<Int>()
@@ -802,6 +862,22 @@ final class AppViewModel: ObservableObject {
             let name = (item.firstString(keys: ["name", "title"]) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             guard !name.isEmpty, seen.insert(id).inserted else { return nil }
             return AvailableFlow(id: id, name: name)
+        }
+        return parsed.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    private func parseAvailableReplies(_ payload: [String: Any]) -> [AvailableReply] {
+        var rows = payload.firstArray(keys: ["replies", "data", "rows", "result"])
+        if rows.isEmpty, let dataObj = payload["data"] as? [String: Any] {
+            rows = dataObj.firstArray(keys: ["replies", "rows", "result"])
+        }
+        var seen = Set<Int>()
+        let parsed: [AvailableReply] = rows.compactMap { item in
+            guard let id = item.firstInt(keys: ["id", "reply_id"]) else { return nil }
+            let name = (item.firstString(keys: ["name", "title"]) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let text = (item.firstString(keys: ["text", "value", "message"]) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty, !text.isEmpty, seen.insert(id).inserted else { return nil }
+            return AvailableReply(id: id, name: name, text: text)
         }
         return parsed.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
@@ -862,6 +938,7 @@ final class AppViewModel: ObservableObject {
                 await refreshAvailableAgents()
                 await refreshAvailableTemplates()
                 await refreshAvailableFlows()
+                await refreshAvailableReplies()
                 isLoading = false
                 isLoggedIn = true
                 screen = .conversations

@@ -98,7 +98,9 @@ enum class TextKey {
     ATTACH_DETACH_TAG,
     SEND_TEMPLATE,
     SEND_FLOW,
+    SEND_QUICK_REPLY,
     SYNC_CUSTOM_FIELD,
+    UPDATE_CONTACT,
     DELETE_CHAT,
     ASSIGN_AGENT_TITLE,
     AGENT_ID,
@@ -110,6 +112,7 @@ enum class TextKey {
     TEMPLATE_ID,
     SEND_FLOW_TITLE,
     FLOW_ID,
+    SEND_QUICK_REPLY_TITLE,
     SYNC_CUSTOM_FIELD_TITLE,
     FIELD_ID,
     FIELD_VALUE,
@@ -245,7 +248,9 @@ fun tr(locale: AppLocale, key: TextKey): String {
         TextKey.ATTACH_DETACH_TAG -> if (isAr) "إرفاق / إزالة وسم" else "Attach / detach tag"
         TextKey.SEND_TEMPLATE -> if (isAr) "إرسال قالب" else "Send template"
         TextKey.SEND_FLOW -> if (isAr) "إرسال تدفق" else "Send flow"
+        TextKey.SEND_QUICK_REPLY -> if (isAr) "إرسال رد سريع" else "Send quick reply"
         TextKey.SYNC_CUSTOM_FIELD -> if (isAr) "مزامنة حقل مخصص" else "Sync custom field"
+        TextKey.UPDATE_CONTACT -> if (isAr) "تحديث جهة الاتصال" else "Update contact"
         TextKey.DELETE_CHAT -> if (isAr) "حذف المحادثة" else "Delete chat"
         TextKey.ASSIGN_AGENT_TITLE -> if (isAr) "تعيين وكيل" else "Assign agent"
         TextKey.AGENT_ID -> if (isAr) "معرّف الوكيل" else "Agent ID"
@@ -257,6 +262,7 @@ fun tr(locale: AppLocale, key: TextKey): String {
         TextKey.TEMPLATE_ID -> if (isAr) "معرّف القالب" else "Template ID"
         TextKey.SEND_FLOW_TITLE -> if (isAr) "إرسال تدفق" else "Send flow"
         TextKey.FLOW_ID -> if (isAr) "معرّف التدفق" else "Flow ID"
+        TextKey.SEND_QUICK_REPLY_TITLE -> if (isAr) "إرسال رد سريع" else "Send quick reply"
         TextKey.SYNC_CUSTOM_FIELD_TITLE -> if (isAr) "مزامنة حقل مخصص" else "Sync custom field"
         TextKey.FIELD_ID -> if (isAr) "معرّف الحقل" else "Field ID"
         TextKey.FIELD_VALUE -> if (isAr) "قيمة الحقل" else "Field Value"

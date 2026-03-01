@@ -16,7 +16,9 @@ struct ChatView: View {
     @State private var showTagDialog = false
     @State private var showTemplateDialog = false
     @State private var showFlowDialog = false
+    @State private var showReplyDialog = false
     @State private var showCustomFieldDialog = false
+    @State private var showUpdateContactDialog = false
     @State private var showDeleteConfirm = false
     @State private var agentSearch = ""
     @State private var tagSearch = ""
@@ -24,9 +26,13 @@ struct ChatView: View {
     @State private var templateInput = ""
     @State private var flowSearch = ""
     @State private var flowInput = ""
+    @State private var replySearch = ""
     @State private var customFieldId = ""
     @State private var customFieldValue = ""
     @State private var customFieldSearch = ""
+    @State private var updateContactName = ""
+    @State private var updateContactPhone = ""
+    @State private var updateContactEmail = ""
     @State private var isNearBottom = true
     @State private var forceAutoScroll = false
     @State private var shouldScrollToLatestOnOpen = true
@@ -129,10 +135,21 @@ struct ChatView: View {
                         flowInput = ""
                         Task { await vm.refreshAvailableFlows() }
                     }
+                    Button(tr(vm.locale, .sendQuickReply)) {
+                        showReplyDialog = true
+                        replySearch = ""
+                        Task { await vm.refreshAvailableReplies() }
+                    }
                     Button(tr(vm.locale, .syncCustomField)) {
                         showCustomFieldDialog = true
                         customFieldSearch = ""
                         Task { await vm.refreshCurrentContactCustomFields() }
+                    }
+                    Button(tr(vm.locale, .updateContact)) {
+                        updateContactName = currentConversation?.customerName ?? ""
+                        updateContactPhone = currentConversation?.customerPhone ?? ""
+                        updateContactEmail = ""
+                        showUpdateContactDialog = true
                     }
                     Button(tr(vm.locale, .deleteChat), role: .destructive) { showDeleteConfirm = true }
                 } label: {
@@ -798,6 +815,74 @@ struct ChatView: View {
                 }
             }
             .presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: $showReplyDialog) {
+            NavigationStack {
+                let q = replySearch.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                let filteredReplies = q.isEmpty
+                    ? vm.availableReplies
+                    : vm.availableReplies.filter {
+                        $0.name.lowercased().contains(q) ||
+                        $0.text.lowercased().contains(q) ||
+                        String($0.id).contains(q)
+                    }
+                VStack(spacing: 10) {
+                    List {
+                        if filteredReplies.isEmpty {
+                            Text(vm.locale == .ar ? "لا توجد ردود مطابقة" : "No matching replies")
+                                .foregroundStyle(AppPalette.textMuted)
+                        } else {
+                            ForEach(filteredReplies, id: \.id) { reply in
+                                Button {
+                                    vm.sendQuickReplyToCurrentChat(replyId: reply.id)
+                                    showReplyDialog = false
+                                    replySearch = ""
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(reply.name)
+                                            .foregroundStyle(AppPalette.textPrimary)
+                                            .lineLimit(1)
+                                        Text(reply.text)
+                                            .font(.system(size: 12))
+                                            .foregroundStyle(AppPalette.textMuted)
+                                            .lineLimit(2)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    .listStyle(.plain)
+                }
+                .searchable(
+                    text: $replySearch,
+                    placement: .navigationBarDrawer(displayMode: .always),
+                    prompt: vm.locale == .ar ? "بحث الردود" : "Search replies"
+                )
+                .navigationTitle(tr(vm.locale, .sendQuickReplyTitle))
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button(tr(vm.locale, .close)) {
+                            showReplyDialog = false
+                            replySearch = ""
+                        }
+                    }
+                }
+            }
+            .presentationDetents([.medium, .large])
+        }
+        .alert(tr(vm.locale, .updateContact), isPresented: $showUpdateContactDialog) {
+            TextField(tr(vm.locale, .nameLabel), text: $updateContactName)
+            TextField(tr(vm.locale, .phoneLabel), text: $updateContactPhone)
+            TextField(tr(vm.locale, .emailOptional), text: $updateContactEmail)
+            Button(tr(vm.locale, .cancel), role: .cancel) {}
+            Button(tr(vm.locale, .save)) {
+                vm.updateCurrentContact(
+                    name: updateContactName,
+                    phone: updateContactPhone,
+                    email: updateContactEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : updateContactEmail
+                )
+            }
         }
         .sheet(isPresented: $showCustomFieldDialog) {
             NavigationStack {

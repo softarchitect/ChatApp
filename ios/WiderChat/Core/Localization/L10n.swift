@@ -24,12 +24,14 @@ enum TextKey {
     case location
     case internalNoteBadge, youLabel
     case assignAgent, unassignAgent, muteConversation, unmuteConversation
-    case markAsRead, markAsUnread, attachDetachTag, sendTemplate, sendFlow, syncCustomField
+    case markAsRead, markAsUnread, attachDetachTag, sendTemplate, sendFlow, sendQuickReply, syncCustomField
+    case updateContact
     case deleteChat
     case assignAgentTitle, agentId
     case attachDetachTagTitle, tagId, attach, detach
     case sendTemplateTitle, templateId
     case sendFlowTitle, flowId
+    case sendQuickReplyTitle
     case syncCustomFieldTitle, fieldId, fieldValue, sync
     case deleteChatQuestion, deleteChatEndpointHint
     case callUnavailable, callUnavailableMessage, ok
@@ -38,6 +40,7 @@ enum TextKey {
     case createUpdateTag, tagName, tagColorHex, tagIdOptional, save
     case createUpdateReply, replyName, replyText, replyIdOptional
     case addContactTitle, emailOptional, add
+    case searchContacts
 }
 
 func tr(_ locale: AppLocale, _ key: TextKey) -> String {
@@ -138,7 +141,9 @@ func tr(_ locale: AppLocale, _ key: TextKey) -> String {
     case .attachDetachTag: return ar ? "إرفاق / إزالة وسم" : "Attach / detach tag"
     case .sendTemplate: return ar ? "إرسال قالب" : "Send template"
     case .sendFlow: return ar ? "إرسال تدفق" : "Send flow"
+    case .sendQuickReply: return ar ? "إرسال رد سريع" : "Send quick reply"
     case .syncCustomField: return ar ? "مزامنة حقل مخصص" : "Sync custom field"
+    case .updateContact: return ar ? "تحديث جهة الاتصال" : "Update contact"
     case .deleteChat: return ar ? "حذف المحادثة" : "Delete chat"
     case .assignAgentTitle: return ar ? "تعيين وكيل" : "Assign agent"
     case .agentId: return ar ? "معرّف الوكيل" : "Agent ID"
@@ -150,6 +155,7 @@ func tr(_ locale: AppLocale, _ key: TextKey) -> String {
     case .templateId: return ar ? "معرّف القالب" : "Template ID"
     case .sendFlowTitle: return ar ? "إرسال تدفق" : "Send flow"
     case .flowId: return ar ? "معرّف التدفق" : "Flow ID"
+    case .sendQuickReplyTitle: return ar ? "إرسال رد سريع" : "Send quick reply"
     case .syncCustomFieldTitle: return ar ? "مزامنة حقل مخصص" : "Sync custom field"
     case .fieldId: return ar ? "معرّف الحقل" : "Field ID"
     case .fieldValue: return ar ? "قيمة الحقل" : "Field Value"
@@ -175,5 +181,6 @@ func tr(_ locale: AppLocale, _ key: TextKey) -> String {
     case .addContactTitle: return ar ? "إضافة جهة اتصال" : "Add Contact"
     case .emailOptional: return ar ? "البريد الإلكتروني (اختياري)" : "Email (optional)"
     case .add: return ar ? "إضافة" : "Add"
+    case .searchContacts: return ar ? "البحث في جهات الاتصال" : "Search contacts"
     }
 }

@@ -126,6 +126,7 @@ import com.widers.widerchat.domain.model.AppLocale
 import com.widers.widerchat.domain.model.AvailableAgent
 import com.widers.widerchat.domain.model.AvailableCustomField
 import com.widers.widerchat.domain.model.AvailableFlow
+import com.widers.widerchat.domain.model.AvailableReply
 import com.widers.widerchat.domain.model.AvailableTag
 import com.widers.widerchat.domain.model.AvailableTemplate
 import com.widers.widerchat.domain.model.ChatMessage
@@ -166,6 +167,8 @@ fun ChatScreen(
     onRefreshTemplates: () -> Unit,
     availableFlows: List<AvailableFlow>,
     onRefreshFlows: () -> Unit,
+    availableReplies: List<AvailableReply>,
+    onRefreshReplies: () -> Unit,
     onAssignAgent: (Long) -> Unit,
     onUnassignAgent: () -> Unit,
     onMute: (Boolean) -> Unit,
@@ -174,7 +177,9 @@ fun ChatScreen(
     onDetachTag: (Long) -> Unit,
     onSendTemplate: (Long) -> Unit,
     onSendFlow: (Long) -> Unit,
+    onSendQuickReply: (Long) -> Unit,
     onSyncCustomField: (String, String) -> Unit,
+    onUpdateContact: (String, String, String?) -> Unit,
     onDeleteChat: () -> Unit,
     isHistoryLoading: Boolean,
     actionStatus: String?
@@ -224,7 +229,9 @@ fun ChatScreen(
     var showTagDialog by remember { mutableStateOf(false) }
     var showTemplateDialog by remember { mutableStateOf(false) }
     var showFlowDialog by remember { mutableStateOf(false) }
+    var showReplyDialog by remember { mutableStateOf(false) }
     var showCustomDialog by remember { mutableStateOf(false) }
+    var showUpdateContactDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showContactInfoDialog by remember { mutableStateOf(false) }
     var showMediaLinksDocsDialog by remember { mutableStateOf(false) }
@@ -234,6 +241,11 @@ fun ChatScreen(
     var browserAudioUrl by remember { mutableStateOf<String?>(null) }
     var showAttachMenu by remember { mutableStateOf(false) }
     var showEmojiPicker by remember { mutableStateOf(false) }
+    var replySearch by remember { mutableStateOf("") }
+    var replySearchDebounced by remember { mutableStateOf("") }
+    var updateContactName by remember { mutableStateOf("") }
+    var updateContactPhone by remember { mutableStateOf("") }
+    var updateContactEmail by remember { mutableStateOf("") }
     var selectedEmojiCategory by remember { mutableStateOf("recent") }
     var emojiSearchQuery by remember { mutableStateOf("") }
     var mediaRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
@@ -564,11 +576,31 @@ fun ChatScreen(
                         }
                     )
                     DropdownMenuItem(
+                        text = { Text(tr(locale, TextKey.SEND_QUICK_REPLY)) },
+                        onClick = {
+                            showReplyDialog = true
+                            replySearch = ""
+                            replySearchDebounced = ""
+                            onRefreshReplies()
+                            menuOpen = false
+                        }
+                    )
+                    DropdownMenuItem(
                         text = { Text(tr(locale, TextKey.SYNC_CUSTOM_FIELD)) },
                         onClick = {
                             showCustomDialog = true
                             customFieldSearch = ""
                             onRefreshCustomFields()
+                            menuOpen = false
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text(tr(locale, TextKey.UPDATE_CONTACT)) },
+                        onClick = {
+                            updateContactName = conversation.customerName
+                            updateContactPhone = conversation.customerPhone
+                            updateContactEmail = ""
+                            showUpdateContactDialog = true
                             menuOpen = false
                         }
                     )
@@ -981,6 +1013,14 @@ fun ChatScreen(
         delay(250)
         flowSearchDebounced = flowSearch
     }
+    LaunchedEffect(replySearch) {
+        if (replySearch.isBlank()) {
+            replySearchDebounced = ""
+            return@LaunchedEffect
+        }
+        delay(250)
+        replySearchDebounced = replySearch
+    }
     DisposableEffect(Unit) {
         onDispose {
             try {
@@ -1367,6 +1407,140 @@ fun ChatScreen(
                     flowSearchDebounced = ""
                     flowInput = ""
                 }) { Text(tr(locale, TextKey.SEND)) }
+            }
+        )
+    }
+
+    if (showReplyDialog) {
+        val q = replySearchDebounced.trim().lowercase()
+        val filteredReplies = if (q.isBlank()) {
+            availableReplies
+        } else {
+            availableReplies.filter { reply ->
+                reply.name.lowercase().contains(q) ||
+                    reply.text.lowercase().contains(q) ||
+                    reply.id.toString().contains(q)
+            }
+        }
+        AlertDialog(
+            onDismissRequest = {
+                showReplyDialog = false
+                replySearch = ""
+                replySearchDebounced = ""
+            },
+            title = { Text(tr(locale, TextKey.SEND_QUICK_REPLY_TITLE)) },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = replySearch,
+                        onValueChange = { replySearch = it },
+                        label = { Text(if (locale == AppLocale.AR) "بحث الردود" else "Search replies") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                    if (filteredReplies.isEmpty()) {
+                        Text(
+                            text = if (locale == AppLocale.AR) "لا توجد ردود مطابقة" else "No matching replies",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        filteredReplies.forEachIndexed { index, reply ->
+                            TextButton(
+                                onClick = {
+                                    onSendQuickReply(reply.id)
+                                    showReplyDialog = false
+                                    replySearch = ""
+                                    replySearchDebounced = ""
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalAlignment = Alignment.Start
+                                ) {
+                                    Text(
+                                        text = reply.name,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = reply.text,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                            if (index < filteredReplies.lastIndex) {
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
+                            }
+                        }
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showReplyDialog = false
+                    replySearch = ""
+                    replySearchDebounced = ""
+                }) { Text(tr(locale, TextKey.CANCEL)) }
+            },
+            confirmButton = {}
+        )
+    }
+
+    if (showUpdateContactDialog) {
+        AlertDialog(
+            onDismissRequest = { showUpdateContactDialog = false },
+            title = { Text(tr(locale, TextKey.UPDATE_CONTACT)) },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = updateContactName,
+                        onValueChange = { updateContactName = it },
+                        singleLine = true,
+                        label = { Text(tr(locale, TextKey.NAME_LABEL)) }
+                    )
+                    OutlinedTextField(
+                        value = updateContactPhone,
+                        onValueChange = { updateContactPhone = it },
+                        singleLine = true,
+                        label = { Text(tr(locale, TextKey.PHONE_LABEL)) }
+                    )
+                    OutlinedTextField(
+                        value = updateContactEmail,
+                        onValueChange = { updateContactEmail = it },
+                        singleLine = true,
+                        label = { Text(tr(locale, TextKey.EMAIL_OPTIONAL)) }
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showUpdateContactDialog = false }) { Text(tr(locale, TextKey.CANCEL)) }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onUpdateContact(
+                            updateContactName.trim(),
+                            updateContactPhone.trim(),
+                            updateContactEmail.trim().ifBlank { null }
+                        )
+                        showUpdateContactDialog = false
+                    },
+                    enabled = updateContactName.isNotBlank() && updateContactPhone.isNotBlank()
+                ) { Text(tr(locale, TextKey.SAVE)) }
             }
         )
     }

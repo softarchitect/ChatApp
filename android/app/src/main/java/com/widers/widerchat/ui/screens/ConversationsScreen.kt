@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -667,37 +668,56 @@ fun ConversationsScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     } else {
-                        contacts
-                            .filter { item ->
-                                val qName = contactSearch.trim().lowercase()
-                                val qPhone = contactSearch.filter { it.isDigit() }
-                                val nameMatch = qName.isBlank() || item.name.lowercase().contains(qName)
-                                val phoneMatch = qPhone.isBlank() || item.phone.filter { it.isDigit() }.contains(qPhone)
-                                nameMatch && phoneMatch
-                            }
-                            .take(8)
-                            .forEach { item ->
-                                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            onStartConversationForContact(item)
-                                            showNewConversationDialog = false
-                                            newName = ""
-                                            newPhone = ""
-                                        }
-                                        .padding(vertical = 8.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text(item.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    Text(
-                                        item.phone,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                        val filteredContacts = contacts.filter { item ->
+                            val qName = contactSearch.trim().lowercase()
+                            val qPhone = contactSearch.filter { it.isDigit() }
+                            val nameMatch = qName.isBlank() || item.name.lowercase().contains(qName)
+                            val phoneMatch = qPhone.isBlank() || item.phone.filter { it.isDigit() }.contains(qPhone)
+                            nameMatch && phoneMatch
+                        }
+                        if (filteredContacts.isEmpty()) {
+                            Text(
+                                text = if (locale == AppLocale.AR) "لا توجد نتائج" else "No matching contacts",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 160.dp, max = 320.dp)
+                            ) {
+                                items(filteredContacts, key = { it.id }) { item ->
+                                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                onStartConversationForContact(item)
+                                                showNewConversationDialog = false
+                                                newName = ""
+                                                newPhone = ""
+                                            }
+                                            .padding(vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            item.name,
+                                            modifier = Modifier.weight(1f),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            item.phone,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1
+                                        )
+                                    }
                                 }
                             }
+                        }
                     }
                 }
             },

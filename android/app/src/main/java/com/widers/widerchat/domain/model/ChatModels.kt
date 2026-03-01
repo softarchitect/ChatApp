@@ -87,6 +87,12 @@ data class AvailableFlow(
     val name: String
 )
 
+data class AvailableReply(
+    val id: Long,
+    val name: String,
+    val text: String
+)
+
 data class ChatMessage(
     val id: String,
     val conversationId: String,

@@ -728,7 +728,7 @@ struct ConversationsView: View {
 
                 Divider().overlay(AppPalette.border)
 
-                TextField("Search contacts...", text: $contactSearch)
+                TextField(tr(vm.locale, .searchContacts), text: $contactSearch)
                     .padding(.horizontal, 12)
                     .frame(height: 40)
                     .background(AppPalette.card)
@@ -744,7 +744,7 @@ struct ConversationsView: View {
                 } else {
                     ScrollView {
                         LazyVStack(spacing: 0) {
-                            ForEach(filteredContacts.prefix(20)) { contact in
+                            ForEach(filteredContacts) { contact in
                                 Button {
                                     vm.startConversationForContact(contact)
                                     showNewConversationDialog = false
@@ -755,11 +755,12 @@ struct ConversationsView: View {
                                                 .font(.system(size: 15, weight: .semibold))
                                                 .foregroundStyle(AppPalette.textPrimary)
                                                 .lineLimit(1)
-                                            Text(contact.phone)
-                                                .font(.system(size: 13))
-                                                .foregroundStyle(AppPalette.textMuted)
                                         }
                                         Spacer()
+                                        Text(contact.phone)
+                                            .font(.system(size: 12))
+                                            .foregroundStyle(AppPalette.textMuted)
+                                            .lineLimit(1)
                                     }
                                     .padding(.horizontal, 16)
                                     .padding(.vertical, 10)
@@ -769,6 +770,7 @@ struct ConversationsView: View {
                             }
                         }
                     }
+                    .frame(maxHeight: 360)
                 }
                 Spacer(minLength: 0)
             }
