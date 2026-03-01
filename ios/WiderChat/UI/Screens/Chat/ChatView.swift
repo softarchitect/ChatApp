@@ -20,7 +20,13 @@ struct ChatView: View {
     @State private var showDeleteConfirm = false
     @State private var agentSearch = ""
     @State private var tagSearch = ""
+    @State private var templateSearch = ""
+    @State private var templateSearchDebounced = ""
+    @State private var templateSearchTask: Task<Void, Never>?
     @State private var templateInput = ""
+    @State private var flowSearch = ""
+    @State private var flowSearchDebounced = ""
+    @State private var flowSearchTask: Task<Void, Never>?
     @State private var flowInput = ""
     @State private var customFieldId = ""
     @State private var customFieldValue = ""
@@ -115,8 +121,21 @@ struct ChatView: View {
                         tagSearch = ""
                         Task { await vm.refreshAvailableTags() }
                     }
-                    Button(tr(vm.locale, .sendTemplate)) { showTemplateDialog = true }
-                    Button(tr(vm.locale, .sendFlow)) { showFlowDialog = true }
+                    Button(tr(vm.locale, .sendTemplate)) {
+                        showTemplateDialog = true
+                        templateSearch = ""
+                        templateSearchDebounced = ""
+                        templateInput = ""
+                        templateSearchTask?.cancel()
+                        Task { await vm.refreshAvailableTemplates() }
+                    }
+                    Button(tr(vm.locale, .sendFlow)) {
+                        showFlowDialog = true
+                        flowSearch = ""
+                        flowSearchDebounced = ""
+                        flowInput = ""
+                        Task { await vm.refreshAvailableFlows() }
+                    }
                     Button(tr(vm.locale, .syncCustomField)) {
                         showCustomFieldDialog = true
                         customFieldSearch = ""
@@ -619,21 +638,219 @@ struct ChatView: View {
             }
             .presentationDetents([.medium, .large])
         }
-        .alert(tr(vm.locale, .sendTemplateTitle), isPresented: $showTemplateDialog) {
-            TextField(tr(vm.locale, .templateId), text: $templateInput)
-            Button(tr(vm.locale, .cancel), role: .cancel) {}
-            Button(tr(vm.locale, .send)) {
-                if let value = Int(templateInput) { vm.sendTemplateToCurrentChat(templateId: value) }
-                templateInput = ""
+        .sheet(isPresented: $showTemplateDialog) {
+            NavigationStack {
+                let q = templateSearchDebounced.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                let filteredTemplates = q.isEmpty
+                    ? vm.availableTemplates
+                    : vm.availableTemplates.filter {
+                        $0.name.lowercased().contains(q) || String($0.id).contains(q)
+                    }
+                VStack(spacing: 10) {
+                    TextField(tr(vm.locale, .templateId), text: $templateInput)
+                        .textInputAutocapitalization(.never)
+                        .disableAutocorrection(true)
+                        .keyboardType(.numberPad)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(AppPalette.surface)
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .padding(.horizontal, 12)
+
+                    if !templateInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Button {
+                            if let value = Int(templateInput) { vm.sendTemplateToCurrentChat(templateId: value) }
+                            showTemplateDialog = false
+                            templateInput = ""
+                            templateSearch = ""
+                            templateSearchDebounced = ""
+                            templateSearchTask?.cancel()
+                        } label: {
+                            Text(tr(vm.locale, .send))
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                                .background(AppPalette.primary)
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 12)
+                    }
+
+                    List {
+                        if filteredTemplates.isEmpty {
+                            Text(vm.locale == .ar ? "لا توجد قوالب مطابقة" : "No matching templates")
+                                .foregroundStyle(AppPalette.textMuted)
+                        } else {
+                            ForEach(filteredTemplates) { template in
+                                Button {
+                                    vm.sendTemplateToCurrentChat(templateId: template.id)
+                                    showTemplateDialog = false
+                                    templateInput = ""
+                                    templateSearch = ""
+                                    templateSearchDebounced = ""
+                                    templateSearchTask?.cancel()
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Text(template.name)
+                                            .foregroundStyle(AppPalette.textPrimary)
+                                            .lineLimit(1)
+                                        Spacer()
+                                        Text("#\(template.id)")
+                                            .font(.system(size: 12, weight: .medium))
+                                            .foregroundStyle(AppPalette.textMuted)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    .listStyle(.plain)
+                }
+                .searchable(
+                    text: $templateSearch,
+                    placement: .navigationBarDrawer(displayMode: .always),
+                    prompt: vm.locale == .ar ? "بحث القوالب" : "Search templates"
+                )
+                .onChange(of: templateSearch) { _, newValue in
+                    templateSearchTask?.cancel()
+                    if newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        templateSearchDebounced = ""
+                        return
+                    }
+                    templateSearchTask = Task {
+                        try? await Task.sleep(nanoseconds: 250_000_000)
+                        guard !Task.isCancelled else { return }
+                        await MainActor.run {
+                            templateSearchDebounced = newValue
+                        }
+                    }
+                }
+                .navigationTitle(tr(vm.locale, .sendTemplateTitle))
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button(tr(vm.locale, .close)) {
+                            showTemplateDialog = false
+                            templateInput = ""
+                            templateSearch = ""
+                            templateSearchDebounced = ""
+                            templateSearchTask?.cancel()
+                        }
+                    }
+                }
+                .onDisappear {
+                    templateSearchTask?.cancel()
+                }
             }
+            .presentationDetents([.medium, .large])
         }
-        .alert(tr(vm.locale, .sendFlowTitle), isPresented: $showFlowDialog) {
-            TextField(tr(vm.locale, .flowId), text: $flowInput)
-            Button(tr(vm.locale, .cancel), role: .cancel) {}
-            Button(tr(vm.locale, .send)) {
-                if let value = Int(flowInput) { vm.sendFlowToCurrentChat(flowId: value) }
-                flowInput = ""
+        .sheet(isPresented: $showFlowDialog) {
+            NavigationStack {
+                let q = flowSearchDebounced.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                let filteredFlows = q.isEmpty
+                    ? vm.availableFlows
+                    : vm.availableFlows.filter {
+                        $0.name.lowercased().contains(q) || String($0.id).contains(q)
+                    }
+                VStack(spacing: 10) {
+                    TextField(tr(vm.locale, .flowId), text: $flowInput)
+                        .textInputAutocapitalization(.never)
+                        .disableAutocorrection(true)
+                        .keyboardType(.numberPad)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(AppPalette.surface)
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .padding(.horizontal, 12)
+
+                    if !flowInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Button {
+                            if let value = Int(flowInput) { vm.sendFlowToCurrentChat(flowId: value) }
+                            showFlowDialog = false
+                            flowInput = ""
+                            flowSearch = ""
+                            flowSearchDebounced = ""
+                            flowSearchTask?.cancel()
+                        } label: {
+                            Text(tr(vm.locale, .send))
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                                .background(AppPalette.primary)
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 12)
+                    }
+
+                    List {
+                        if filteredFlows.isEmpty {
+                            Text(vm.locale == .ar ? "لا توجد تدفقات مطابقة" : "No matching flows")
+                                .foregroundStyle(AppPalette.textMuted)
+                        } else {
+                            ForEach(filteredFlows) { flow in
+                                Button {
+                                    vm.sendFlowToCurrentChat(flowId: flow.id)
+                                    showFlowDialog = false
+                                    flowInput = ""
+                                    flowSearch = ""
+                                    flowSearchDebounced = ""
+                                    flowSearchTask?.cancel()
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Text(flow.name)
+                                            .foregroundStyle(AppPalette.textPrimary)
+                                            .lineLimit(1)
+                                        Spacer()
+                                        Text("#\(flow.id)")
+                                            .font(.system(size: 12, weight: .medium))
+                                            .foregroundStyle(AppPalette.textMuted)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    .listStyle(.plain)
+                }
+                .searchable(
+                    text: $flowSearch,
+                    placement: .navigationBarDrawer(displayMode: .always),
+                    prompt: vm.locale == .ar ? "بحث التدفقات" : "Search flows"
+                )
+                .onChange(of: flowSearch) { _, newValue in
+                    flowSearchTask?.cancel()
+                    if newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        flowSearchDebounced = ""
+                        return
+                    }
+                    flowSearchTask = Task {
+                        try? await Task.sleep(nanoseconds: 250_000_000)
+                        guard !Task.isCancelled else { return }
+                        await MainActor.run {
+                            flowSearchDebounced = newValue
+                        }
+                    }
+                }
+                .navigationTitle(tr(vm.locale, .sendFlowTitle))
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button(tr(vm.locale, .close)) {
+                            showFlowDialog = false
+                            flowInput = ""
+                            flowSearch = ""
+                            flowSearchDebounced = ""
+                            flowSearchTask?.cancel()
+                        }
+                    }
+                }
+                .onDisappear {
+                    flowSearchTask?.cancel()
+                }
             }
+            .presentationDetents([.medium, .large])
         }
         .sheet(isPresented: $showCustomFieldDialog) {
             NavigationStack {

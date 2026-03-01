@@ -8,7 +8,9 @@ import com.widers.widerchat.domain.model.AppLocale
 import com.widers.widerchat.domain.model.AppScreen
 import com.widers.widerchat.domain.model.AvailableAgent
 import com.widers.widerchat.domain.model.AvailableCustomField
+import com.widers.widerchat.domain.model.AvailableFlow
 import com.widers.widerchat.domain.model.AvailableTag
+import com.widers.widerchat.domain.model.AvailableTemplate
 import com.widers.widerchat.domain.model.ChatMessage
 import com.widers.widerchat.domain.model.Conversation
 import com.widers.widerchat.domain.model.ConversationStatus
@@ -41,6 +43,8 @@ data class AppUiState(
     val availableTags: List<AvailableTag> = emptyList(),
     val availableAgents: List<AvailableAgent> = emptyList(),
     val availableCustomFields: List<AvailableCustomField> = emptyList(),
+    val availableTemplates: List<AvailableTemplate> = emptyList(),
+    val availableFlows: List<AvailableFlow> = emptyList(),
     val screen: AppScreen = AppScreen.LOGIN,
     val activeChatId: String? = null,
     val conversations: List<Conversation> = emptyList(),
@@ -87,6 +91,8 @@ class AppViewModel(
                 )
                 refreshAvailableTags()
                 refreshAvailableAgents()
+                refreshAvailableTemplates()
+                refreshAvailableFlows()
             } catch (_: Exception) {
                 _uiState.value = _uiState.value.copy(isLoading = false, loginError = true)
             }
@@ -118,6 +124,8 @@ class AppViewModel(
                 )
                 refreshAvailableTags()
                 refreshAvailableAgents()
+                refreshAvailableTemplates()
+                refreshAvailableFlows()
             } catch (_: Exception) {
                 _uiState.value = _uiState.value.copy(isLoading = false, isLoggedIn = false, loginError = true)
             }
@@ -140,7 +148,9 @@ class AppViewModel(
             profileName = "",
             profileEmail = "",
             availableAgents = emptyList(),
-            availableCustomFields = emptyList()
+            availableCustomFields = emptyList(),
+            availableTemplates = emptyList(),
+            availableFlows = emptyList()
         )
     }
 
@@ -534,6 +544,8 @@ class AppViewModel(
                 repo.getAgents()
                 refreshAvailableTags()
                 refreshAvailableAgents()
+                refreshAvailableTemplates()
+                refreshAvailableFlows()
                 setActionStatus("Support data synced")
             }
         }
@@ -831,6 +843,30 @@ class AppViewModel(
         }
     }
 
+    fun refreshAvailableTemplates() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val payload = networkRepo()?.getTemplates()
+                val parsed = parseAvailableTemplates(payload)
+                _uiState.value = _uiState.value.copy(availableTemplates = parsed)
+            } catch (_: Exception) {
+                _uiState.value = _uiState.value.copy(availableTemplates = emptyList())
+            }
+        }
+    }
+
+    fun refreshAvailableFlows() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val payload = networkRepo()?.getFlows()
+                val parsed = parseAvailableFlows(payload)
+                _uiState.value = _uiState.value.copy(availableFlows = parsed)
+            } catch (_: Exception) {
+                _uiState.value = _uiState.value.copy(availableFlows = emptyList())
+            }
+        }
+    }
+
     private suspend fun refreshAvailableAgentsInternal() {
         val payload = networkRepo()?.getAgents()
         val parsed = parseAvailableAgents(payload)
@@ -923,6 +959,64 @@ class AppViewModel(
         parseObjectMap(dataObj?.optJSONObject("fields"))
 
         return result
+    }
+
+    private fun parseAvailableTemplates(payload: JSONObject?): List<AvailableTemplate> {
+        var items = payload?.optJSONArray("templates")
+            ?: payload?.optJSONArray("data")
+            ?: payload?.optJSONArray("rows")
+            ?: payload?.optJSONArray("result")
+        if (items == null) {
+            val dataObj = payload?.optJSONObject("data")
+            items = dataObj?.optJSONArray("templates")
+                ?: dataObj?.optJSONArray("rows")
+                ?: dataObj?.optJSONArray("result")
+        }
+        if (items == null) return emptyList()
+        val parsed = buildList {
+            for (i in 0 until items.length()) {
+                val item = items.optJSONObject(i) ?: continue
+                val id = sequenceOf("id", "template_id")
+                    .mapNotNull { key -> item.opt(key)?.toString()?.toLongOrNull() }
+                    .firstOrNull()
+                    ?: continue
+                val name = sequenceOf("name", "title")
+                    .map { key -> item.optString(key).trim() }
+                    .firstOrNull { it.isNotEmpty() }
+                    ?: continue
+                add(AvailableTemplate(id = id, name = name))
+            }
+        }
+        return parsed.distinctBy { it.id }
+    }
+
+    private fun parseAvailableFlows(payload: JSONObject?): List<AvailableFlow> {
+        var items = payload?.optJSONArray("flows")
+            ?: payload?.optJSONArray("data")
+            ?: payload?.optJSONArray("rows")
+            ?: payload?.optJSONArray("result")
+        if (items == null) {
+            val dataObj = payload?.optJSONObject("data")
+            items = dataObj?.optJSONArray("flows")
+                ?: dataObj?.optJSONArray("rows")
+                ?: dataObj?.optJSONArray("result")
+        }
+        if (items == null) return emptyList()
+        val parsed = buildList {
+            for (i in 0 until items.length()) {
+                val item = items.optJSONObject(i) ?: continue
+                val id = sequenceOf("id", "flow_id")
+                    .mapNotNull { key -> item.opt(key)?.toString()?.toLongOrNull() }
+                    .firstOrNull()
+                    ?: continue
+                val name = sequenceOf("name", "title")
+                    .map { key -> item.optString(key).trim() }
+                    .firstOrNull { it.isNotEmpty() }
+                    ?: continue
+                add(AvailableFlow(id = id, name = name))
+            }
+        }
+        return parsed.distinctBy { it.id }
     }
 
     private fun networkRepo(): NetworkChatRepository? = repository as? NetworkChatRepository

@@ -77,6 +77,16 @@ data class AvailableCustomField(
     val value: String? = null
 )
 
+data class AvailableTemplate(
+    val id: Long,
+    val name: String
+)
+
+data class AvailableFlow(
+    val id: Long,
+    val name: String
+)
+
 data class ChatMessage(
     val id: String,
     val conversationId: String,

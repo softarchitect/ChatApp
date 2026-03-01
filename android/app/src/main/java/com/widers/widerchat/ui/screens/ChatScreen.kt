@@ -125,7 +125,9 @@ import com.widers.widerchat.core.tr
 import com.widers.widerchat.domain.model.AppLocale
 import com.widers.widerchat.domain.model.AvailableAgent
 import com.widers.widerchat.domain.model.AvailableCustomField
+import com.widers.widerchat.domain.model.AvailableFlow
 import com.widers.widerchat.domain.model.AvailableTag
+import com.widers.widerchat.domain.model.AvailableTemplate
 import com.widers.widerchat.domain.model.ChatMessage
 import com.widers.widerchat.domain.model.Conversation
 import com.widers.widerchat.domain.model.ConversationStatus
@@ -160,6 +162,10 @@ fun ChatScreen(
     onRefreshTags: () -> Unit,
     availableCustomFields: List<AvailableCustomField>,
     onRefreshCustomFields: () -> Unit,
+    availableTemplates: List<AvailableTemplate>,
+    onRefreshTemplates: () -> Unit,
+    availableFlows: List<AvailableFlow>,
+    onRefreshFlows: () -> Unit,
     onAssignAgent: (Long) -> Unit,
     onUnassignAgent: () -> Unit,
     onMute: (Boolean) -> Unit,
@@ -205,7 +211,11 @@ fun ChatScreen(
     var menuOpen by remember { mutableStateOf(false) }
     var agentSearch by remember { mutableStateOf("") }
     var tagSearch by remember { mutableStateOf("") }
+    var templateSearch by remember { mutableStateOf("") }
+    var templateSearchDebounced by remember { mutableStateOf("") }
     var templateInput by remember { mutableStateOf("") }
+    var flowSearch by remember { mutableStateOf("") }
+    var flowSearchDebounced by remember { mutableStateOf("") }
     var flowInput by remember { mutableStateOf("") }
     var customFieldId by remember { mutableStateOf("") }
     var customFieldValue by remember { mutableStateOf("") }
@@ -535,6 +545,10 @@ fun ChatScreen(
                         text = { Text(tr(locale, TextKey.SEND_TEMPLATE)) },
                         onClick = {
                             showTemplateDialog = true
+                            templateSearch = ""
+                            templateSearchDebounced = ""
+                            templateInput = ""
+                            onRefreshTemplates()
                             menuOpen = false
                         }
                     )
@@ -542,6 +556,10 @@ fun ChatScreen(
                         text = { Text(tr(locale, TextKey.SEND_FLOW)) },
                         onClick = {
                             showFlowDialog = true
+                            flowSearch = ""
+                            flowSearchDebounced = ""
+                            flowInput = ""
+                            onRefreshFlows()
                             menuOpen = false
                         }
                     )
@@ -947,6 +965,22 @@ fun ChatScreen(
     LaunchedEffect(isNearBottom) {
         if (isNearBottom) pendingNewMessages = 0
     }
+    LaunchedEffect(templateSearch) {
+        if (templateSearch.isBlank()) {
+            templateSearchDebounced = ""
+            return@LaunchedEffect
+        }
+        delay(250)
+        templateSearchDebounced = templateSearch
+    }
+    LaunchedEffect(flowSearch) {
+        if (flowSearch.isBlank()) {
+            flowSearchDebounced = ""
+            return@LaunchedEffect
+        }
+        delay(250)
+        flowSearchDebounced = flowSearch
+    }
     DisposableEffect(Unit) {
         onDispose {
             try {
@@ -1136,15 +1170,100 @@ fun ChatScreen(
     }
 
     if (showTemplateDialog) {
+        val q = templateSearchDebounced.trim().lowercase()
+        val filteredTemplates = if (q.isBlank()) {
+            availableTemplates
+        } else {
+            availableTemplates.filter { template ->
+                template.name.lowercase().contains(q) || template.id.toString().contains(q)
+            }
+        }
         AlertDialog(
-            onDismissRequest = { showTemplateDialog = false },
+            onDismissRequest = {
+                showTemplateDialog = false
+                templateSearch = ""
+                templateSearchDebounced = ""
+                templateInput = ""
+            },
             title = { Text(tr(locale, TextKey.SEND_TEMPLATE_TITLE)) },
-            text = { OutlinedTextField(value = templateInput, onValueChange = { templateInput = it }, label = { Text(tr(locale, TextKey.TEMPLATE_ID)) }) },
-            dismissButton = { TextButton(onClick = { showTemplateDialog = false }) { Text(tr(locale, TextKey.CANCEL)) } },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = templateSearch,
+                        onValueChange = { templateSearch = it },
+                        label = { Text(if (locale == AppLocale.AR) "بحث القوالب" else "Search templates") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = templateInput,
+                        onValueChange = { templateInput = it },
+                        label = { Text(tr(locale, TextKey.TEMPLATE_ID)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                    if (filteredTemplates.isEmpty()) {
+                        Text(
+                            text = if (locale == AppLocale.AR) "لا توجد قوالب مطابقة" else "No matching templates",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        filteredTemplates.forEachIndexed { index, template ->
+                            TextButton(
+                                onClick = {
+                                    onSendTemplate(template.id)
+                                    showTemplateDialog = false
+                                    templateSearch = ""
+                                    templateSearchDebounced = ""
+                                    templateInput = ""
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = template.name,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "#${template.id}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            if (index < filteredTemplates.lastIndex) {
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
+                            }
+                        }
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showTemplateDialog = false
+                    templateSearch = ""
+                    templateSearchDebounced = ""
+                    templateInput = ""
+                }) { Text(tr(locale, TextKey.CANCEL)) }
+            },
             confirmButton = {
                 TextButton(onClick = {
                     templateInput.toLongOrNull()?.let(onSendTemplate)
                     showTemplateDialog = false
+                    templateSearch = ""
+                    templateSearchDebounced = ""
                     templateInput = ""
                 }) { Text(tr(locale, TextKey.SEND)) }
             }
@@ -1152,15 +1271,100 @@ fun ChatScreen(
     }
 
     if (showFlowDialog) {
+        val q = flowSearchDebounced.trim().lowercase()
+        val filteredFlows = if (q.isBlank()) {
+            availableFlows
+        } else {
+            availableFlows.filter { flow ->
+                flow.name.lowercase().contains(q) || flow.id.toString().contains(q)
+            }
+        }
         AlertDialog(
-            onDismissRequest = { showFlowDialog = false },
+            onDismissRequest = {
+                showFlowDialog = false
+                flowSearch = ""
+                flowSearchDebounced = ""
+                flowInput = ""
+            },
             title = { Text(tr(locale, TextKey.SEND_FLOW_TITLE)) },
-            text = { OutlinedTextField(value = flowInput, onValueChange = { flowInput = it }, label = { Text(tr(locale, TextKey.FLOW_ID)) }) },
-            dismissButton = { TextButton(onClick = { showFlowDialog = false }) { Text(tr(locale, TextKey.CANCEL)) } },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = flowSearch,
+                        onValueChange = { flowSearch = it },
+                        label = { Text(if (locale == AppLocale.AR) "بحث التدفقات" else "Search flows") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = flowInput,
+                        onValueChange = { flowInput = it },
+                        label = { Text(tr(locale, TextKey.FLOW_ID)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                    if (filteredFlows.isEmpty()) {
+                        Text(
+                            text = if (locale == AppLocale.AR) "لا توجد تدفقات مطابقة" else "No matching flows",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        filteredFlows.forEachIndexed { index, flow ->
+                            TextButton(
+                                onClick = {
+                                    onSendFlow(flow.id)
+                                    showFlowDialog = false
+                                    flowSearch = ""
+                                    flowSearchDebounced = ""
+                                    flowInput = ""
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = flow.name,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "#${flow.id}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            if (index < filteredFlows.lastIndex) {
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
+                            }
+                        }
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showFlowDialog = false
+                    flowSearch = ""
+                    flowSearchDebounced = ""
+                    flowInput = ""
+                }) { Text(tr(locale, TextKey.CANCEL)) }
+            },
             confirmButton = {
                 TextButton(onClick = {
                     flowInput.toLongOrNull()?.let(onSendFlow)
                     showFlowDialog = false
+                    flowSearch = ""
+                    flowSearchDebounced = ""
                     flowInput = ""
                 }) { Text(tr(locale, TextKey.SEND)) }
             }

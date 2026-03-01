@@ -65,7 +65,23 @@ final class WidersAPIClient {
     }
 
     func getContactCustomFields(session: APISession, contactId: Int) async throws -> [String: Any] {
-        try await get(path: "/api/sync-contact-custom-fields", query: sessionBody(session, extra: ["contact_id": contactId]))
+        let path = "/api/sync-contact-custom-fields"
+        // Primary style (current implementation): GET + query payload.
+        do {
+            return try await get(path: path, query: sessionBody(session, extra: ["contact_id": contactId]))
+        } catch {
+            // Fallback 1: POST with full session payload.
+            do {
+                return try await postJSON(path: path, body: sessionBody(session, extra: ["contact_id": contactId]))
+            } catch {
+                // Fallback 2: legacy POST body shape used by some backend variants.
+                return try await postJSON(path: path, body: [
+                    "token": session.token,
+                    "company_id": session.companyId,
+                    "contact_id": contactId
+                ])
+            }
+        }
     }
 
     func syncContactCustomFields(session: APISession, contactId: Int, custom: [String: Any]) async throws -> [String: Any] {

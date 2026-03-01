@@ -64,6 +64,8 @@ final class AppViewModel: ObservableObject {
     @Published var availableTags: [AvailableTag] = []
     @Published var availableAgents: [AvailableAgent] = []
     @Published var availableCustomFields: [AvailableCustomField] = []
+    @Published var availableTemplates: [AvailableTemplate] = []
+    @Published var availableFlows: [AvailableFlow] = []
     @Published var profileName = ""
     @Published var profileEmail = ""
     private var localOutgoingByConversation: [String: [ChatMessage]] = [:]
@@ -100,6 +102,8 @@ final class AppViewModel: ObservableObject {
             conversations = loaded
             await refreshAvailableTags()
             await refreshAvailableAgents()
+            await refreshAvailableTemplates()
+            await refreshAvailableFlows()
             let profile = repository.currentUserSnapshot()
             profileName = profile.name ?? ""
             profileEmail = profile.email ?? ""
@@ -128,6 +132,8 @@ final class AppViewModel: ObservableObject {
         profileEmail = ""
         availableAgents = []
         availableCustomFields = []
+        availableTemplates = []
+        availableFlows = []
         secureStore.removeValue(for: SessionKeys.profileName)
         secureStore.removeValue(for: SessionKeys.profileEmail)
     }
@@ -518,6 +524,8 @@ final class AppViewModel: ObservableObject {
             let c6 = await repository.getAgentsList()
             availableTags = c3.map(parseAvailableTags) ?? []
             availableAgents = c6.map(parseAvailableAgents) ?? []
+            availableTemplates = c2.map(parseAvailableTemplates) ?? []
+            availableFlows = c5.map(parseAvailableFlows) ?? []
             isActionLoading = false
             let allOk = [c1, c2, c3, c4, c5, c6].allSatisfy { $0 != nil }
             actionStatus = allOk ? "Support data synced" : "Failed: support data sync incomplete"
@@ -726,6 +734,22 @@ final class AppViewModel: ObservableObject {
         availableAgents = parseAvailableAgents(payload)
     }
 
+    func refreshAvailableTemplates() async {
+        guard let payload = await repository.getTemplatesList() else {
+            availableTemplates = []
+            return
+        }
+        availableTemplates = parseAvailableTemplates(payload)
+    }
+
+    func refreshAvailableFlows() async {
+        guard let payload = await repository.getFlowsList() else {
+            availableFlows = []
+            return
+        }
+        availableFlows = parseAvailableFlows(payload)
+    }
+
     private func parseAvailableTags(_ payload: [String: Any]) -> [AvailableTag] {
         let rows = payload.firstArray(keys: ["tags", "data", "rows", "result"])
         var seen = Set<Int>()
@@ -748,6 +772,36 @@ final class AppViewModel: ObservableObject {
             let name = (item.firstString(keys: ["name", "full_name", "username"]) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             guard !name.isEmpty, seen.insert(id).inserted else { return nil }
             return AvailableAgent(id: id, name: name)
+        }
+        return parsed.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    private func parseAvailableTemplates(_ payload: [String: Any]) -> [AvailableTemplate] {
+        var rows = payload.firstArray(keys: ["templates", "data", "rows", "result"])
+        if rows.isEmpty, let dataObj = payload["data"] as? [String: Any] {
+            rows = dataObj.firstArray(keys: ["templates", "rows", "result"])
+        }
+        var seen = Set<Int>()
+        let parsed: [AvailableTemplate] = rows.compactMap { item in
+            guard let id = item.firstInt(keys: ["id", "template_id"]) else { return nil }
+            let name = (item.firstString(keys: ["name", "title"]) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty, seen.insert(id).inserted else { return nil }
+            return AvailableTemplate(id: id, name: name)
+        }
+        return parsed.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    private func parseAvailableFlows(_ payload: [String: Any]) -> [AvailableFlow] {
+        var rows = payload.firstArray(keys: ["flows", "data", "rows", "result"])
+        if rows.isEmpty, let dataObj = payload["data"] as? [String: Any] {
+            rows = dataObj.firstArray(keys: ["flows", "rows", "result"])
+        }
+        var seen = Set<Int>()
+        let parsed: [AvailableFlow] = rows.compactMap { item in
+            guard let id = item.firstInt(keys: ["id", "flow_id"]) else { return nil }
+            let name = (item.firstString(keys: ["name", "title"]) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty, seen.insert(id).inserted else { return nil }
+            return AvailableFlow(id: id, name: name)
         }
         return parsed.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
@@ -806,6 +860,8 @@ final class AppViewModel: ObservableObject {
                 conversations = loaded
                 await refreshAvailableTags()
                 await refreshAvailableAgents()
+                await refreshAvailableTemplates()
+                await refreshAvailableFlows()
                 isLoading = false
                 isLoggedIn = true
                 screen = .conversations
@@ -824,6 +880,8 @@ final class AppViewModel: ObservableObject {
                 availableTags = []
                 availableAgents = []
                 availableCustomFields = []
+                availableTemplates = []
+                availableFlows = []
             }
         }
     }

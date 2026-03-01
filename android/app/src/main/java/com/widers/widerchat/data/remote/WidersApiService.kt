@@ -66,8 +66,27 @@ class WidersApiService(
     fun getAgentsList(session: SessionContext): JSONObject =
         getWithQuery("/api/chats/agents/list", sessionPayload(session))
 
-    fun getContactCustomFields(session: SessionContext, contactId: Long): JSONObject =
-        getWithQuery("/api/sync-contact-custom-fields", sessionPayload(session).put("contact_id", contactId))
+    fun getContactCustomFields(session: SessionContext, contactId: Long): JSONObject {
+        val path = "/api/sync-contact-custom-fields"
+        // Primary style (current implementation): GET + query payload.
+        try {
+            return getWithQuery(path, sessionPayload(session).put("contact_id", contactId))
+        } catch (_: Exception) {
+            // Fallback 1: POST with full session payload.
+            try {
+                return postJson(path, sessionPayload(session).put("contact_id", contactId))
+            } catch (_: Exception) {
+                // Fallback 2: POST legacy payload shape used by some backend variants.
+                return postJson(
+                    path,
+                    JSONObject()
+                        .put("token", session.token)
+                        .put("company_id", session.companyId)
+                        .put("contact_id", contactId)
+                )
+            }
+        }
+    }
 
     fun syncContactCustomFields(session: SessionContext, contactId: Long, custom: JSONObject): JSONObject =
         postJson(
