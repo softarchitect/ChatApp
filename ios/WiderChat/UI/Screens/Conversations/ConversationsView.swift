@@ -198,6 +198,530 @@ struct ConversationsView: View {
     }
 
     var body: some View {
+        configuredBody
+    }
+
+    private var configuredBody: AnyView {
+        AnyView(
+            conversationsRoot
+            .onChange(of: filtered.count) { _, newValue in
+                if newValue < visibleConversationCount {
+                    visibleConversationCount = max(30, newValue)
+                } else if visibleConversationCount == 0 {
+                    visibleConversationCount = 30
+                }
+            }
+            .sheet(item: $quickActionsConversation) { convo in
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(convo.customerName)
+                        .font(.system(size: 19, weight: .bold))
+                        .foregroundStyle(AppPalette.textPrimary)
+                        .lineLimit(1)
+
+                    if let agent = convo.assignedAgentName, !agent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text("\(vm.locale == .ar ? "الوكيل" : "Agent"): \(agent)")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(AppPalette.primary)
+                            .lineLimit(1)
+                    }
+
+                    if !convo.lastMessage.isEmpty {
+                        Text(convo.lastMessage)
+                            .font(.system(size: 13))
+                            .foregroundStyle(AppPalette.textMuted)
+                            .lineLimit(2)
+                    }
+
+                    if !convo.tags.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(Array(convo.tags.prefix(6)), id: \.id) { tag in
+                                    Button {
+                                        quickActionsConversation = nil
+                                        tagManageContext = TagManageContext(conversationId: convo.id, tag: tag)
+                                        tagManageSelectedTagId = tag.id
+                                    } label: {
+                                        HStack(spacing: 5) {
+                                            Circle()
+                                                .fill(Color.white.opacity(0.22))
+                                                .frame(width: 14, height: 14)
+                                                .overlay(
+                                                    Text(tag.repeatedAt.isEmpty ? "1" : "\(tag.repeatedAt.count)")
+                                                        .font(.system(size: 9, weight: .bold))
+                                                        .foregroundStyle(.white)
+                                                )
+                                            Text(tag.name)
+                                                .font(.system(size: 11, weight: .semibold))
+                                                .foregroundStyle(.white)
+                                        }
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 5)
+                                        .background(tagAccentColor(hex: tag.colorHex))
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                                if convo.tags.count > 6 {
+                                    Text("+\(convo.tags.count - 6)")
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundStyle(AppPalette.textMuted)
+                                }
+                            }
+                        }
+                    }
+
+                    Divider().overlay(AppPalette.border)
+
+                    Button {
+                        vm.openChat(id: convo.id)
+                        quickActionsConversation = nil
+                    } label: {
+                        quickActionRowLabel(
+                            title: vm.locale == .ar ? "فتح المحادثة" : "Open chat",
+                            subtitle: vm.locale == .ar ? "الانتقال إلى الرسائل" : "Go to messages",
+                            icon: "bubble.left.and.bubble.right.fill",
+                            color: AppPalette.primary
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        vm.markConversationRead(conversationId: convo.id, read: convo.unreadCount > 0)
+                        quickActionsConversation = nil
+                    } label: {
+                        quickActionRowLabel(
+                            title: convo.unreadCount > 0
+                                ? (vm.locale == .ar ? "تحديد كمقروء" : "Mark as read")
+                                : (vm.locale == .ar ? "تحديد كغير مقروء" : "Mark as unread"),
+                            subtitle: convo.unreadCount > 0
+                                ? (vm.locale == .ar ? "إزالة غير المقروء" : "Clear unread badge")
+                                : (vm.locale == .ar ? "إظهار كغير مقروء" : "Show as unread"),
+                            icon: convo.unreadCount > 0 ? "checkmark.circle.fill" : "envelope.badge.fill",
+                            color: .blue
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        quickActionsConversation = nil
+                        tagPickerConversationId = convo.id
+                        tagPickerSearch = ""
+                        tagPickerSearchDebounced = ""
+                        Task { await vm.refreshAvailableTags() }
+                    } label: {
+                        quickActionRowLabel(
+                            title: vm.locale == .ar ? "إضافة وسم" : "Add tag",
+                            subtitle: vm.locale == .ar ? "اختر من كل الوسوم مع البحث" : "Search and pick from all tags",
+                            icon: "tag.fill",
+                            color: .purple
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        vm.toggleConversationStatus(conversationId: convo.id)
+                        quickActionsConversation = nil
+                    } label: {
+                        quickActionRowLabel(
+                            title: convo.status == .open
+                                ? (vm.locale == .ar ? "إغلاق المحادثة" : "Close conversation")
+                                : (vm.locale == .ar ? "إعادة فتح المحادثة" : "Reopen conversation"),
+                            subtitle: convo.status == .open
+                                ? (vm.locale == .ar ? "إخفاءها من المفتوحة" : "Move out of open list")
+                                : (vm.locale == .ar ? "إرجاعها إلى المفتوحة" : "Move back to open list"),
+                            icon: convo.status == .open ? "lock.circle.fill" : "lock.open.fill",
+                            color: convo.status == .open ? .orange : .green
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer(minLength: 8)
+                }
+                .padding(16)
+                .presentationDetents([.height(400), .medium])
+            }
+            .confirmationDialog(
+                vm.locale == .ar ? "فلتر القراءة" : "Read filter",
+                isPresented: $showReadFilterDialog
+            ) {
+                Button(vm.locale == .ar ? "الكل" : "All") { readFilter = .all }
+                Button(vm.locale == .ar ? "مقروء" : "Read") { readFilter = .read }
+                Button(vm.locale == .ar ? "غير مقروء" : "Unread") { readFilter = .unread }
+                Button(vm.locale == .ar ? "إلغاء" : "Cancel", role: .cancel) {}
+            }
+            .confirmationDialog(
+                vm.locale == .ar ? "فلتر التعيين" : "Assignment filter",
+                isPresented: $showAssignmentFilterDialog
+            ) {
+                Button(vm.locale == .ar ? "الكل" : "All") { assignmentFilter = .all }
+                Button(vm.locale == .ar ? "محادثاتي" : "My conversations") { assignmentFilter = .my }
+                Button(vm.locale == .ar ? "غير معين" : "Unassigned") { assignmentFilter = .unassigned }
+                Button(vm.locale == .ar ? "إلغاء" : "Cancel", role: .cancel) {}
+            }
+            .confirmationDialog(
+                vm.locale == .ar ? "فلتر الرضا" : "Satisfaction filter",
+                isPresented: $showSatisfactionFilterDialog
+            ) {
+                Button(vm.locale == .ar ? "الكل" : "All") { satisfactionFilter = .all }
+                Button(vm.locale == .ar ? "راضٍ" : "Satisfied") { satisfactionFilter = .satisfied }
+                Button(vm.locale == .ar ? "محايد" : "Neutral") { satisfactionFilter = .neutral }
+                Button(vm.locale == .ar ? "غير راضٍ" : "Unsatisfied") { satisfactionFilter = .unsatisfied }
+                Button(vm.locale == .ar ? "بدون تقييم" : "No rating") { satisfactionFilter = .noRating }
+                Button(vm.locale == .ar ? "إلغاء" : "Cancel", role: .cancel) {}
+            }
+            .confirmationDialog(
+                vm.locale == .ar ? "الترتيب" : "Sorting",
+                isPresented: $showSortFilterDialog
+            ) {
+                Button(vm.locale == .ar ? "الأحدث" : "Latest") { sortFilter = .latest }
+                Button(vm.locale == .ar ? "إنشاء (الأحدث)" : "Created (Newest)") { sortFilter = .createdNewest }
+                Button(vm.locale == .ar ? "إنشاء (الأقدم)" : "Created (Oldest)") { sortFilter = .createdOldest }
+                Button(vm.locale == .ar ? "تحديث (الأحدث)" : "Updated (Newest)") { sortFilter = .updatedNewest }
+                Button(vm.locale == .ar ? "تحديث (الأقدم)" : "Updated (Oldest)") { sortFilter = .updatedOldest }
+                Button(vm.locale == .ar ? "إلغاء" : "Cancel", role: .cancel) {}
+            }
+            .confirmationDialog(
+                vm.locale == .ar ? "فلتر الوسم" : "Tag filter",
+                isPresented: $showTagFilterDialog
+            ) {
+                Button(vm.locale == .ar ? "الكل" : "All") { selectedTagId = nil }
+                ForEach(vm.availableTags) { tag in
+                    Button("\(tag.name) (#\(tag.id))") { selectedTagId = tag.id }
+                }
+                Button(vm.locale == .ar ? "إلغاء" : "Cancel", role: .cancel) {}
+            }
+            .sheet(
+                isPresented: Binding(
+                    get: { tagPickerConversationId != nil },
+                    set: {
+                        if !$0 {
+                            tagPickerConversationId = nil
+                            tagPickerSearch = ""
+                            tagPickerSearchDebounced = ""
+                            tagPickerDebounceTask?.cancel()
+                            tagPickerDebounceTask = nil
+                        }
+                    }
+                )
+            ) {
+                NavigationStack {
+                    Group {
+                        if vm.availableTags.isEmpty {
+                            VStack(spacing: 10) {
+                                Text(vm.locale == .ar ? "لا توجد وسوم متاحة" : "No tags available")
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(AppPalette.textPrimary)
+                                Text(vm.locale == .ar ? "تأكد من مزامنة الوسوم من الإعدادات." : "Please sync tags from Settings.")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(AppPalette.textMuted)
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                            .padding(.horizontal, 20)
+                        } else {
+                            List {
+                                ForEach(filteredTagPickerTags) { tag in
+                                    Button {
+                                        if let convoId = tagPickerConversationId {
+                                            vm.attachTag(conversationId: convoId, tagId: tag.id)
+                                        }
+                                        tagPickerConversationId = nil
+                                        tagPickerSearch = ""
+                                    } label: {
+                                        HStack(spacing: 10) {
+                                            Circle()
+                                                .fill(tagAccentColor(hex: tag.colorHex))
+                                                .frame(width: 10, height: 10)
+                                            Text(tag.name)
+                                                .foregroundStyle(AppPalette.textPrimary)
+                                                .lineLimit(1)
+                                            Spacer()
+                                            Text("#\(tag.id)")
+                                                .font(.system(size: 11))
+                                                .foregroundStyle(AppPalette.textMuted)
+                                        }
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .listStyle(.plain)
+                        }
+                    }
+                    .searchable(
+                        text: $tagPickerSearch,
+                        placement: .navigationBarDrawer(displayMode: .always),
+                        prompt: vm.locale == .ar ? "بحث الوسوم" : "Search tags"
+                    )
+                    .onChange(of: tagPickerSearch) { _, value in
+                        tagPickerDebounceTask?.cancel()
+                        tagPickerDebounceTask = Task {
+                            try? await Task.sleep(nanoseconds: 220_000_000)
+                            guard !Task.isCancelled else { return }
+                            await MainActor.run {
+                                tagPickerSearchDebounced = value
+                            }
+                        }
+                    }
+                    .navigationTitle(vm.locale == .ar ? "إضافة وسم سريع" : "Quick add tag")
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button(vm.locale == .ar ? "إغلاق" : "Close") {
+                                tagPickerConversationId = nil
+                                tagPickerSearch = ""
+                                tagPickerSearchDebounced = ""
+                                tagPickerDebounceTask?.cancel()
+                                tagPickerDebounceTask = nil
+                            }
+                        }
+                    }
+                }
+                .presentationDetents([.medium, .large])
+            }
+            .sheet(item: $tagManageContext) { context in
+                let conversationTags = vm.conversations.first(where: { $0.id == context.conversationId })?.tags ?? [context.tag]
+                let activeTag = conversationTags.first(where: { $0.id == tagManageSelectedTagId }) ?? context.tag
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(activeTag.name)
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundStyle(AppPalette.textPrimary)
+
+                    if !conversationTags.isEmpty {
+                        Text(vm.locale == .ar ? "كل الوسوم:" : "All tags:")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(AppPalette.textSecondary)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(conversationTags, id: \.id) { tag in
+                                    Button {
+                                        tagManageSelectedTagId = tag.id
+                                    } label: {
+                                        HStack(spacing: 5) {
+                                            Text(tag.repeatedAt.isEmpty ? "1" : "\(tag.repeatedAt.count)")
+                                                .font(.system(size: 10, weight: .bold))
+                                                .foregroundStyle(.white)
+                                                .frame(width: 16, height: 16)
+                                                .background(Color.white.opacity(0.22))
+                                                .clipShape(Circle())
+                                            Text(tag.name)
+                                                .font(.system(size: 11, weight: .semibold))
+                                                .foregroundStyle(.white)
+                                        }
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 5)
+                                        .background(tagAccentColor(hex: tag.colorHex))
+                                        .overlay {
+                                            RoundedRectangle(cornerRadius: 8)
+                                                .stroke(
+                                                    tag.id == activeTag.id ? Color.white.opacity(0.9) : Color.clear,
+                                                    lineWidth: 1.2
+                                                )
+                                        }
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+                    }
+
+                    Text(vm.locale == .ar ? "تاريخ الإضافة:" : "Added at:")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(AppPalette.textSecondary)
+                    Text(formatTagHistoryDate(activeTag.attachedAt))
+                        .font(.system(size: 13))
+                        .foregroundStyle(AppPalette.textMuted)
+
+                    Text(
+                        vm.locale == .ar
+                            ? "تواريخ التكرار (\(activeTag.repeatedAt.count)):"
+                            : "Repeat history (\(activeTag.repeatedAt.count)):"
+                    )
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(AppPalette.textSecondary)
+
+                    if activeTag.repeatedAt.isEmpty {
+                        Text(vm.locale == .ar ? "لا يوجد تكرار" : "No repeats")
+                            .font(.system(size: 12))
+                            .foregroundStyle(AppPalette.textMuted)
+                    } else {
+                        ForEach(Array(activeTag.repeatedAt.prefix(5)), id: \.self) { value in
+                            Text("• \(formatTagHistoryDate(value))")
+                                .font(.system(size: 12))
+                                .foregroundStyle(AppPalette.textMuted)
+                        }
+                    }
+
+                    Spacer(minLength: 8)
+
+                    HStack(spacing: 10) {
+                        Button(vm.locale == .ar ? "إزالة" : "Detach") {
+                            vm.detachTag(conversationId: context.conversationId, tagId: activeTag.id)
+                            tagManageContext = nil
+                            tagManageSelectedTagId = nil
+                        }
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.red)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.red.opacity(0.10))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .buttonStyle(.plain)
+
+                        Button(vm.locale == .ar ? "تكرار" : "Repeat") {
+                            vm.repeatTag(conversationId: context.conversationId, tagId: activeTag.id)
+                            tagManageContext = nil
+                            tagManageSelectedTagId = nil
+                        }
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(AppPalette.primary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(AppPalette.primary.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .buttonStyle(.plain)
+
+                        Spacer()
+
+                        Button(vm.locale == .ar ? "إغلاق" : "Close") {
+                            tagManageContext = nil
+                            tagManageSelectedTagId = nil
+                        }
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(AppPalette.textSecondary)
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(16)
+                .presentationDetents([.height(330), .medium])
+            }
+            .sheet(isPresented: $showNewConversationDialog) {
+                VStack(spacing: 12) {
+                    HStack {
+                        Text(tr(vm.locale, .newConversationTitle))
+                            .font(.system(size: 22, weight: .bold))
+                        Spacer()
+                        Button(tr(vm.locale, .cancel)) {
+                            showNewConversationDialog = false
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+
+                    TextField(tr(vm.locale, .nameLabel), text: $newConversationName)
+                        .padding(.horizontal, 12)
+                        .frame(height: 44)
+                        .background(AppPalette.card)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .padding(.horizontal, 16)
+
+                    TextField(tr(vm.locale, .phoneLabel), text: $newConversationPhone)
+                        .keyboardType(.phonePad)
+                        .padding(.horizontal, 12)
+                        .frame(height: 44)
+                        .background(AppPalette.card)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .padding(.horizontal, 16)
+
+                    Button(tr(vm.locale, .create)) {
+                        vm.startNewConversation(name: newConversationName, phone: newConversationPhone)
+                        newConversationName = ""
+                        newConversationPhone = ""
+                        showNewConversationDialog = false
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
+                    .background((newConversationName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || newConversationPhone.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) ? AppPalette.textMuted.opacity(0.3) : AppPalette.primary)
+                    .foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .padding(.horizontal, 16)
+                    .disabled(newConversationName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || newConversationPhone.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                    Divider().overlay(AppPalette.border)
+
+                    TextField(tr(vm.locale, .searchContacts), text: $contactSearch)
+                        .padding(.horizontal, 12)
+                        .frame(height: 40)
+                        .background(AppPalette.card)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .padding(.horizontal, 16)
+                        .onChange(of: contactSearch) { _, value in
+                            visibleContactCount = 25
+                            vm.searchContactsForNewConversation(value)
+                        }
+
+                    if vm.contactsLoading {
+                        ProgressView()
+                            .padding(.vertical, 20)
+                    } else {
+                        ScrollView {
+                            LazyVStack(spacing: 0) {
+                                ForEach(Array(filteredContacts.prefix(visibleContactCount))) { contact in
+                                    Button {
+                                        vm.startConversationForContact(contact)
+                                        showNewConversationDialog = false
+                                    } label: {
+                                        HStack {
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text(contact.name)
+                                                    .font(.system(size: 15, weight: .semibold))
+                                                    .foregroundStyle(AppPalette.textPrimary)
+                                                    .lineLimit(1)
+                                            }
+                                            Spacer()
+                                            Text(contact.phone)
+                                                .font(.system(size: 12))
+                                                .foregroundStyle(AppPalette.textMuted)
+                                                .lineLimit(1)
+                                        }
+                                        .padding(.horizontal, 16)
+                                        .padding(.vertical, 10)
+                                    }
+                                    .buttonStyle(.plain)
+                                    Divider().overlay(AppPalette.border.opacity(0.5))
+                                }
+                                if visibleContactCount < filteredContacts.count {
+                                    HStack {
+                                        Spacer()
+                                        ProgressView()
+                                        Spacer()
+                                    }
+                                    .padding(.vertical, 10)
+                                    .onAppear {
+                                        visibleContactCount = min(visibleContactCount + 25, filteredContacts.count)
+                                    }
+                                }
+                            }
+                        }
+                        .frame(maxHeight: 360)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .presentationDetents([.large])
+            }
+            .onChange(of: showNewConversationDialog) { _, open in
+                if open {
+                    visibleContactCount = 25
+                }
+            }
+            .onAppear {
+                search = storedSearch
+                selectedTab = storedTab
+                readFilter = ReadFilter(rawValue: storedReadFilter) ?? .all
+                assignmentFilter = AssignmentFilter(rawValue: storedAssignmentFilter) ?? .all
+                satisfactionFilter = SatisfactionFilter(rawValue: storedSatisfactionFilter) ?? .all
+                sortFilter = SortFilter(rawValue: storedSortFilter) ?? .latest
+                selectedTagId = storedTagId > 0 ? storedTagId : nil
+            }
+            .onChange(of: search) { _, value in storedSearch = value }
+            .onChange(of: selectedTab) { _, value in storedTab = value }
+            .onChange(of: readFilter) { _, value in storedReadFilter = value.rawValue }
+            .onChange(of: assignmentFilter) { _, value in storedAssignmentFilter = value.rawValue }
+            .onChange(of: satisfactionFilter) { _, value in storedSatisfactionFilter = value.rawValue }
+            .onChange(of: sortFilter) { _, value in storedSortFilter = value.rawValue }
+            .onChange(of: selectedTagId) { _, value in storedTagId = value ?? 0 }
+        )
+    }
+
+    private var conversationsRoot: some View {
         VStack(spacing: 0) {
             HStack {
                 if selectionMode {
@@ -440,520 +964,6 @@ struct ConversationsView: View {
                 }
             }
         }
-        .onChange(of: filtered.count) { _, newValue in
-            if newValue < visibleConversationCount {
-                visibleConversationCount = max(30, newValue)
-            } else if visibleConversationCount == 0 {
-                visibleConversationCount = 30
-            }
-        }
-        .sheet(item: $quickActionsConversation) { convo in
-            VStack(alignment: .leading, spacing: 12) {
-                Text(convo.customerName)
-                    .font(.system(size: 19, weight: .bold))
-                    .foregroundStyle(AppPalette.textPrimary)
-                    .lineLimit(1)
-
-                if let agent = convo.assignedAgentName, !agent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text("\(vm.locale == .ar ? "الوكيل" : "Agent"): \(agent)")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(AppPalette.primary)
-                        .lineLimit(1)
-                }
-
-                if !convo.lastMessage.isEmpty {
-                    Text(convo.lastMessage)
-                        .font(.system(size: 13))
-                        .foregroundStyle(AppPalette.textMuted)
-                        .lineLimit(2)
-                }
-
-                if !convo.tags.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(Array(convo.tags.prefix(6)), id: \.id) { tag in
-                                Button {
-                                    quickActionsConversation = nil
-                                    tagManageContext = TagManageContext(conversationId: convo.id, tag: tag)
-                                    tagManageSelectedTagId = tag.id
-                                } label: {
-                                    HStack(spacing: 5) {
-                                        Circle()
-                                            .fill(Color.white.opacity(0.22))
-                                            .frame(width: 14, height: 14)
-                                            .overlay(
-                                                Text(tag.repeatedAt.isEmpty ? "1" : "\(tag.repeatedAt.count)")
-                                                    .font(.system(size: 9, weight: .bold))
-                                                    .foregroundStyle(.white)
-                                            )
-                                        Text(tag.name)
-                                            .font(.system(size: 11, weight: .semibold))
-                                            .foregroundStyle(.white)
-                                    }
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 5)
-                                    .background(tagAccentColor(hex: tag.colorHex))
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                                }
-                                .buttonStyle(.plain)
-                            }
-                            if convo.tags.count > 6 {
-                                Text("+\(convo.tags.count - 6)")
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundStyle(AppPalette.textMuted)
-                            }
-                        }
-                    }
-                }
-
-                Divider().overlay(AppPalette.border)
-
-                Button {
-                    vm.openChat(id: convo.id)
-                    quickActionsConversation = nil
-                } label: {
-                    quickActionRowLabel(
-                        title: vm.locale == .ar ? "فتح المحادثة" : "Open chat",
-                        subtitle: vm.locale == .ar ? "الانتقال إلى الرسائل" : "Go to messages",
-                        icon: "bubble.left.and.bubble.right.fill",
-                        color: AppPalette.primary
-                    )
-                }
-                .buttonStyle(.plain)
-
-                Button {
-                    vm.markConversationRead(conversationId: convo.id, read: convo.unreadCount > 0)
-                    quickActionsConversation = nil
-                } label: {
-                    quickActionRowLabel(
-                        title: convo.unreadCount > 0
-                            ? (vm.locale == .ar ? "تحديد كمقروء" : "Mark as read")
-                            : (vm.locale == .ar ? "تحديد كغير مقروء" : "Mark as unread"),
-                        subtitle: convo.unreadCount > 0
-                            ? (vm.locale == .ar ? "إزالة غير المقروء" : "Clear unread badge")
-                            : (vm.locale == .ar ? "إظهار كغير مقروء" : "Show as unread"),
-                        icon: convo.unreadCount > 0 ? "checkmark.circle.fill" : "envelope.badge.fill",
-                        color: .blue
-                    )
-                }
-                .buttonStyle(.plain)
-
-                Button {
-                    quickActionsConversation = nil
-                    tagPickerConversationId = convo.id
-                    tagPickerSearch = ""
-                    tagPickerSearchDebounced = ""
-                    Task { await vm.refreshAvailableTags() }
-                } label: {
-                    quickActionRowLabel(
-                        title: vm.locale == .ar ? "إضافة وسم" : "Add tag",
-                        subtitle: vm.locale == .ar ? "اختر من كل الوسوم مع البحث" : "Search and pick from all tags",
-                        icon: "tag.fill",
-                        color: .purple
-                    )
-                }
-                .buttonStyle(.plain)
-
-                Button {
-                    vm.toggleConversationStatus(conversationId: convo.id)
-                    quickActionsConversation = nil
-                } label: {
-                    quickActionRowLabel(
-                        title: convo.status == .open
-                            ? (vm.locale == .ar ? "إغلاق المحادثة" : "Close conversation")
-                            : (vm.locale == .ar ? "إعادة فتح المحادثة" : "Reopen conversation"),
-                        subtitle: convo.status == .open
-                            ? (vm.locale == .ar ? "إخفاءها من المفتوحة" : "Move out of open list")
-                            : (vm.locale == .ar ? "إرجاعها إلى المفتوحة" : "Move back to open list"),
-                        icon: convo.status == .open ? "lock.circle.fill" : "lock.open.fill",
-                        color: convo.status == .open ? .orange : .green
-                    )
-                }
-                .buttonStyle(.plain)
-
-                Spacer(minLength: 8)
-            }
-            .padding(16)
-            .presentationDetents([.height(400), .medium])
-        }
-        .confirmationDialog(
-            vm.locale == .ar ? "فلتر القراءة" : "Read filter",
-            isPresented: $showReadFilterDialog
-        ) {
-            Button(vm.locale == .ar ? "الكل" : "All") { readFilter = .all }
-            Button(vm.locale == .ar ? "مقروء" : "Read") { readFilter = .read }
-            Button(vm.locale == .ar ? "غير مقروء" : "Unread") { readFilter = .unread }
-            Button(vm.locale == .ar ? "إلغاء" : "Cancel", role: .cancel) {}
-        }
-        .confirmationDialog(
-            vm.locale == .ar ? "فلتر التعيين" : "Assignment filter",
-            isPresented: $showAssignmentFilterDialog
-        ) {
-            Button(vm.locale == .ar ? "الكل" : "All") { assignmentFilter = .all }
-            Button(vm.locale == .ar ? "محادثاتي" : "My conversations") { assignmentFilter = .my }
-            Button(vm.locale == .ar ? "غير معين" : "Unassigned") { assignmentFilter = .unassigned }
-            Button(vm.locale == .ar ? "إلغاء" : "Cancel", role: .cancel) {}
-        }
-        .confirmationDialog(
-            vm.locale == .ar ? "فلتر الرضا" : "Satisfaction filter",
-            isPresented: $showSatisfactionFilterDialog
-        ) {
-            Button(vm.locale == .ar ? "الكل" : "All") { satisfactionFilter = .all }
-            Button(vm.locale == .ar ? "راضٍ" : "Satisfied") { satisfactionFilter = .satisfied }
-            Button(vm.locale == .ar ? "محايد" : "Neutral") { satisfactionFilter = .neutral }
-            Button(vm.locale == .ar ? "غير راضٍ" : "Unsatisfied") { satisfactionFilter = .unsatisfied }
-            Button(vm.locale == .ar ? "بدون تقييم" : "No rating") { satisfactionFilter = .noRating }
-            Button(vm.locale == .ar ? "إلغاء" : "Cancel", role: .cancel) {}
-        }
-        .confirmationDialog(
-            vm.locale == .ar ? "الترتيب" : "Sorting",
-            isPresented: $showSortFilterDialog
-        ) {
-            Button(vm.locale == .ar ? "الأحدث" : "Latest") { sortFilter = .latest }
-            Button(vm.locale == .ar ? "إنشاء (الأحدث)" : "Created (Newest)") { sortFilter = .createdNewest }
-            Button(vm.locale == .ar ? "إنشاء (الأقدم)" : "Created (Oldest)") { sortFilter = .createdOldest }
-            Button(vm.locale == .ar ? "تحديث (الأحدث)" : "Updated (Newest)") { sortFilter = .updatedNewest }
-            Button(vm.locale == .ar ? "تحديث (الأقدم)" : "Updated (Oldest)") { sortFilter = .updatedOldest }
-            Button(vm.locale == .ar ? "إلغاء" : "Cancel", role: .cancel) {}
-        }
-        .confirmationDialog(
-            vm.locale == .ar ? "فلتر الوسم" : "Tag filter",
-            isPresented: $showTagFilterDialog
-        ) {
-            Button(vm.locale == .ar ? "الكل" : "All") { selectedTagId = nil }
-            ForEach(vm.availableTags) { tag in
-                Button("\(tag.name) (#\(tag.id))") { selectedTagId = tag.id }
-            }
-            Button(vm.locale == .ar ? "إلغاء" : "Cancel", role: .cancel) {}
-        }
-        .sheet(
-            isPresented: Binding(
-                get: { tagPickerConversationId != nil },
-                set: {
-                    if !$0 {
-                        tagPickerConversationId = nil
-                        tagPickerSearch = ""
-                        tagPickerSearchDebounced = ""
-                        tagPickerDebounceTask?.cancel()
-                        tagPickerDebounceTask = nil
-                    }
-                }
-            )
-        ) {
-            NavigationStack {
-                Group {
-                    if vm.availableTags.isEmpty {
-                        VStack(spacing: 10) {
-                            Text(vm.locale == .ar ? "لا توجد وسوم متاحة" : "No tags available")
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(AppPalette.textPrimary)
-                            Text(vm.locale == .ar ? "تأكد من مزامنة الوسوم من الإعدادات." : "Please sync tags from Settings.")
-                                .font(.system(size: 12))
-                                .foregroundStyle(AppPalette.textMuted)
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                        .padding(.horizontal, 20)
-                    } else {
-                        List {
-                            ForEach(filteredTagPickerTags) { tag in
-                                Button {
-                                    if let convoId = tagPickerConversationId {
-                                        vm.attachTag(conversationId: convoId, tagId: tag.id)
-                                    }
-                                    tagPickerConversationId = nil
-                                    tagPickerSearch = ""
-                                } label: {
-                                    HStack(spacing: 10) {
-                                        Circle()
-                                            .fill(tagAccentColor(hex: tag.colorHex))
-                                            .frame(width: 10, height: 10)
-                                        Text(tag.name)
-                                            .foregroundStyle(AppPalette.textPrimary)
-                                            .lineLimit(1)
-                                        Spacer()
-                                        Text("#\(tag.id)")
-                                            .font(.system(size: 11))
-                                            .foregroundStyle(AppPalette.textMuted)
-                                    }
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .listStyle(.plain)
-                    }
-                }
-                .searchable(
-                    text: $tagPickerSearch,
-                    placement: .navigationBarDrawer(displayMode: .always),
-                    prompt: vm.locale == .ar ? "بحث الوسوم" : "Search tags"
-                )
-                .onChange(of: tagPickerSearch) { _, value in
-                    tagPickerDebounceTask?.cancel()
-                    tagPickerDebounceTask = Task {
-                        try? await Task.sleep(nanoseconds: 220_000_000)
-                        guard !Task.isCancelled else { return }
-                        await MainActor.run {
-                            tagPickerSearchDebounced = value
-                        }
-                    }
-                }
-                .navigationTitle(vm.locale == .ar ? "إضافة وسم سريع" : "Quick add tag")
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button(vm.locale == .ar ? "إغلاق" : "Close") {
-                            tagPickerConversationId = nil
-                            tagPickerSearch = ""
-                            tagPickerSearchDebounced = ""
-                            tagPickerDebounceTask?.cancel()
-                            tagPickerDebounceTask = nil
-                        }
-                    }
-                }
-            }
-            .presentationDetents([.medium, .large])
-        }
-        .sheet(item: $tagManageContext) { context in
-            let conversationTags = vm.conversations.first(where: { $0.id == context.conversationId })?.tags ?? [context.tag]
-            let activeTag = conversationTags.first(where: { $0.id == tagManageSelectedTagId }) ?? context.tag
-            VStack(alignment: .leading, spacing: 12) {
-                Text(activeTag.name)
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(AppPalette.textPrimary)
-
-                if !conversationTags.isEmpty {
-                    Text(vm.locale == .ar ? "كل الوسوم:" : "All tags:")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(AppPalette.textSecondary)
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(conversationTags, id: \.id) { tag in
-                                Button {
-                                    tagManageSelectedTagId = tag.id
-                                } label: {
-                                    HStack(spacing: 5) {
-                                        Text(tag.repeatedAt.isEmpty ? "1" : "\(tag.repeatedAt.count)")
-                                            .font(.system(size: 10, weight: .bold))
-                                            .foregroundStyle(.white)
-                                            .frame(width: 16, height: 16)
-                                            .background(Color.white.opacity(0.22))
-                                            .clipShape(Circle())
-                                        Text(tag.name)
-                                            .font(.system(size: 11, weight: .semibold))
-                                            .foregroundStyle(.white)
-                                    }
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 5)
-                                    .background(tagAccentColor(hex: tag.colorHex))
-                                    .overlay {
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .stroke(
-                                                tag.id == activeTag.id ? Color.white.opacity(0.9) : Color.clear,
-                                                lineWidth: 1.2
-                                            )
-                                    }
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                }
-
-                Text(vm.locale == .ar ? "تاريخ الإضافة:" : "Added at:")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(AppPalette.textSecondary)
-                Text(formatTagHistoryDate(activeTag.attachedAt))
-                    .font(.system(size: 13))
-                    .foregroundStyle(AppPalette.textMuted)
-
-                Text(
-                    vm.locale == .ar
-                        ? "تواريخ التكرار (\(activeTag.repeatedAt.count)):"
-                        : "Repeat history (\(activeTag.repeatedAt.count)):"
-                )
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(AppPalette.textSecondary)
-
-                if activeTag.repeatedAt.isEmpty {
-                    Text(vm.locale == .ar ? "لا يوجد تكرار" : "No repeats")
-                        .font(.system(size: 12))
-                        .foregroundStyle(AppPalette.textMuted)
-                } else {
-                    ForEach(Array(activeTag.repeatedAt.prefix(5)), id: \.self) { value in
-                        Text("• \(formatTagHistoryDate(value))")
-                            .font(.system(size: 12))
-                            .foregroundStyle(AppPalette.textMuted)
-                    }
-                }
-
-                Spacer(minLength: 8)
-
-                HStack(spacing: 10) {
-                    Button(vm.locale == .ar ? "إزالة" : "Detach") {
-                        vm.detachTag(conversationId: context.conversationId, tagId: activeTag.id)
-                        tagManageContext = nil
-                        tagManageSelectedTagId = nil
-                    }
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.red)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Color.red.opacity(0.10))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .buttonStyle(.plain)
-
-                    Button(vm.locale == .ar ? "تكرار" : "Repeat") {
-                        vm.repeatTag(conversationId: context.conversationId, tagId: activeTag.id)
-                        tagManageContext = nil
-                        tagManageSelectedTagId = nil
-                    }
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(AppPalette.primary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(AppPalette.primary.opacity(0.12))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .buttonStyle(.plain)
-
-                    Spacer()
-
-                    Button(vm.locale == .ar ? "إغلاق" : "Close") {
-                        tagManageContext = nil
-                        tagManageSelectedTagId = nil
-                    }
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(AppPalette.textSecondary)
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(16)
-            .presentationDetents([.height(330), .medium])
-        }
-        .sheet(isPresented: $showNewConversationDialog) {
-            VStack(spacing: 12) {
-                HStack {
-                    Text(tr(vm.locale, .newConversationTitle))
-                        .font(.system(size: 22, weight: .bold))
-                    Spacer()
-                    Button(tr(vm.locale, .cancel)) {
-                        showNewConversationDialog = false
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-
-                TextField(tr(vm.locale, .nameLabel), text: $newConversationName)
-                    .padding(.horizontal, 12)
-                    .frame(height: 44)
-                    .background(AppPalette.card)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .padding(.horizontal, 16)
-
-                TextField(tr(vm.locale, .phoneLabel), text: $newConversationPhone)
-                    .keyboardType(.phonePad)
-                    .padding(.horizontal, 12)
-                    .frame(height: 44)
-                    .background(AppPalette.card)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .padding(.horizontal, 16)
-
-                Button(tr(vm.locale, .create)) {
-                    vm.startNewConversation(name: newConversationName, phone: newConversationPhone)
-                    newConversationName = ""
-                    newConversationPhone = ""
-                    showNewConversationDialog = false
-                }
-                .frame(maxWidth: .infinity)
-                .frame(height: 44)
-                .background((newConversationName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || newConversationPhone.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) ? AppPalette.textMuted.opacity(0.3) : AppPalette.primary)
-                .foregroundStyle(.white)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-                .padding(.horizontal, 16)
-                .disabled(newConversationName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || newConversationPhone.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-                Divider().overlay(AppPalette.border)
-
-                TextField(tr(vm.locale, .searchContacts), text: $contactSearch)
-                    .padding(.horizontal, 12)
-                    .frame(height: 40)
-                    .background(AppPalette.card)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .padding(.horizontal, 16)
-                    .onChange(of: contactSearch) { _, value in
-                        visibleContactCount = 25
-                        vm.searchContactsForNewConversation(value)
-                    }
-
-                if vm.contactsLoading {
-                    ProgressView()
-                        .padding(.vertical, 20)
-                } else {
-                    ScrollView {
-                        LazyVStack(spacing: 0) {
-                            ForEach(Array(filteredContacts.prefix(visibleContactCount))) { contact in
-                                Button {
-                                    vm.startConversationForContact(contact)
-                                    showNewConversationDialog = false
-                                } label: {
-                                    HStack {
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(contact.name)
-                                                .font(.system(size: 15, weight: .semibold))
-                                                .foregroundStyle(AppPalette.textPrimary)
-                                                .lineLimit(1)
-                                        }
-                                        Spacer()
-                                        Text(contact.phone)
-                                            .font(.system(size: 12))
-                                            .foregroundStyle(AppPalette.textMuted)
-                                            .lineLimit(1)
-                                    }
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 10)
-                                }
-                                .buttonStyle(.plain)
-                                Divider().overlay(AppPalette.border.opacity(0.5))
-                            }
-                            if visibleContactCount < filteredContacts.count {
-                                HStack {
-                                    Spacer()
-                                    ProgressView()
-                                    Spacer()
-                                }
-                                .padding(.vertical, 10)
-                                .onAppear {
-                                    visibleContactCount = min(visibleContactCount + 25, filteredContacts.count)
-                                }
-                            }
-                        }
-                    }
-                    .frame(maxHeight: 360)
-                }
-                Spacer(minLength: 0)
-            }
-            .presentationDetents([.large])
-        }
-        .onChange(of: showNewConversationDialog) { _, open in
-            if open {
-                visibleContactCount = 25
-            }
-        }
-        .onAppear {
-            search = storedSearch
-            selectedTab = storedTab
-            readFilter = ReadFilter(rawValue: storedReadFilter) ?? .all
-            assignmentFilter = AssignmentFilter(rawValue: storedAssignmentFilter) ?? .all
-            satisfactionFilter = SatisfactionFilter(rawValue: storedSatisfactionFilter) ?? .all
-            sortFilter = SortFilter(rawValue: storedSortFilter) ?? .latest
-            selectedTagId = storedTagId > 0 ? storedTagId : nil
-        }
-        .onChange(of: search) { _, value in storedSearch = value }
-        .onChange(of: selectedTab) { _, value in storedTab = value }
-        .onChange(of: readFilter) { _, value in storedReadFilter = value.rawValue }
-        .onChange(of: assignmentFilter) { _, value in storedAssignmentFilter = value.rawValue }
-        .onChange(of: satisfactionFilter) { _, value in storedSatisfactionFilter = value.rawValue }
-        .onChange(of: sortFilter) { _, value in storedSortFilter = value.rawValue }
-        .onChange(of: selectedTagId) { _, value in storedTagId = value ?? 0 }
     }
 
     private func quickActionRowLabel(title: String, subtitle: String, icon: String, color: Color) -> some View {
