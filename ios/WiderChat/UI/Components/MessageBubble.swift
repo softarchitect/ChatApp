@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct MessageBubble: View {
     let message: ChatMessage
@@ -90,7 +91,7 @@ struct MessageBubble: View {
             if let url = match.url {
                 attributed[linkRange].link = url
             } else if let number = match.phoneNumber,
-                      let telURL = URL(string: "tel:\(number.replacingOccurrences(of: \" \", with: \"\"))") {
+                      let telURL = URL(string: "tel:\(number.replacingOccurrences(of: " ", with: ""))") {
                 attributed[linkRange].link = telURL
             }
             attributed[linkRange].foregroundColor = .blue
