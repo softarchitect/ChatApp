@@ -24,10 +24,14 @@ struct ConversationRow: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Text(conversation.customerName)
-                        .font(.system(size: 15, weight: conversation.unreadCount > 0 ? .semibold : .medium))
-                        .foregroundStyle(AppPalette.textPrimary)
-                        .lineLimit(1)
+                    HStack(spacing: 6) {
+                        Text(conversation.customerName)
+                            .font(.system(size: 15, weight: conversation.unreadCount > 0 ? .semibold : .medium))
+                            .foregroundStyle(AppPalette.textPrimary)
+                            .lineLimit(1)
+                            .layoutPriority(1)
+                        SatisfactionBadge(value: conversation.satisfaction, locale: locale, variant: .compact)
+                    }
                     Spacer()
                     Text(conversation.lastMessageTime)
                         .font(.system(size: 12))
@@ -48,35 +52,38 @@ struct ConversationRow: View {
                         StatusPill(text: tr(locale, .closed), color: AppPalette.textMuted.opacity(0.2), textColor: AppPalette.textMuted)
                     }
                     if !conversation.tags.isEmpty {
-                        let tag = conversation.tags[0]
-                        Button {
-                            onTagInfo?(tag)
-                        } label: {
-                            HStack(spacing: 5) {
-                                Text(tag.repeatedAt.isEmpty ? "1" : "\(tag.repeatedAt.count)")
-                                    .font(.system(size: 10, weight: .bold))
-                                    .foregroundStyle(.white)
-                                    .frame(width: 16, height: 16)
-                                    .background(Color.white.opacity(0.22))
-                                    .clipShape(Circle())
-                                Text(tag.name)
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundStyle(.white)
-                                    .lineLimit(1)
+                        ForEach(Array(conversation.tags.prefix(3)), id: \.id) { tag in
+                            Button {
+                                onTagInfo?(tag)
+                            } label: {
+                                HStack(spacing: 5) {
+                                    Text(tag.repeatedAt.isEmpty ? "1" : "\(tag.repeatedAt.count)")
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundStyle(.white)
+                                        .frame(width: 16, height: 16)
+                                        .background(Color.white.opacity(0.22))
+                                        .clipShape(Circle())
+                                    Text(tag.name)
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(.white)
+                                        .lineLimit(1)
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(tagAccentColor(hex: tag.colorHex))
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
                             }
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(tagAccentColor(hex: tag.colorHex))
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
-                        if conversation.tags.count > 1 {
-                            Text("+\(conversation.tags.count - 1)")
+                        if conversation.tags.count > 3 {
+                            Text("+\(conversation.tags.count - 3)")
                                 .font(.system(size: 11, weight: .medium))
                                 .foregroundStyle(AppPalette.textMuted)
                         }
                         Button {
-                            onTagInfo?(tag)
+                            if let first = conversation.tags.first {
+                                onTagInfo?(first)
+                            }
                         } label: {
                             Image(systemName: "info.circle")
                                 .font(.system(size: 14))
@@ -181,6 +188,7 @@ struct ConversationRow: View {
         let value = String(chars)
         return value.isEmpty ? String(name.prefix(1)) : value.uppercased()
     }
+
 }
 
 struct StatusPill: View {

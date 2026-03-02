@@ -20,6 +20,13 @@ enum class ConversationStatus {
     CLOSED
 }
 
+enum class ConversationSatisfaction {
+    SATISFIED,
+    NEUTRAL,
+    UNSATISFIED,
+    NO_RATING
+}
+
 enum class MessageType {
     TEXT,
     IMAGE,
@@ -49,7 +56,9 @@ data class Conversation(
     val status: ConversationStatus,
     val isOnline: Boolean,
     val assignedAgentName: String? = null,
-    val tags: List<ConversationTag> = emptyList()
+    val tags: List<ConversationTag> = emptyList(),
+    val satisfaction: ConversationSatisfaction = ConversationSatisfaction.NO_RATING,
+    val lastMessageEpochMs: Long = 0L
 )
 
 data class ConversationTag(

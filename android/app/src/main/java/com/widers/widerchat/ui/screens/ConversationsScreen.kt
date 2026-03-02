@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -38,6 +39,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.rememberSwipeToDismissBoxState
@@ -52,12 +54,14 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -66,8 +70,10 @@ import com.widers.widerchat.core.tr
 import com.widers.widerchat.domain.model.AvailableTag
 import com.widers.widerchat.domain.model.AppLocale
 import com.widers.widerchat.domain.model.Conversation
+import com.widers.widerchat.domain.model.ConversationSatisfaction
 import com.widers.widerchat.domain.model.ConversationTag
 import com.widers.widerchat.domain.model.ConversationStatus
+import com.widers.widerchat.ui.components.SatisfactionBadge
 import com.widers.widerchat.ui.NewConversationContact
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
@@ -78,17 +84,31 @@ private enum class ReadFilter {
     ALL, READ, UNREAD
 }
 
+private enum class AssignmentFilter {
+    ALL, MY, UNASSIGNED
+}
+
+private enum class SatisfactionFilter {
+    ALL, SATISFIED, NEUTRAL, UNSATISFIED, NO_RATING
+}
+
+private enum class SortFilter {
+    LATEST, CREATED_NEWEST, CREATED_OLDEST, UPDATED_NEWEST, UPDATED_OLDEST
+}
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ConversationsScreen(
     modifier: Modifier = Modifier,
     locale: AppLocale,
     conversations: List<Conversation>,
+    profileName: String,
     contacts: List<NewConversationContact>,
     contactsLoading: Boolean,
     availableTags: List<AvailableTag>,
     onOpenChat: (String) -> Unit,
     onSearchChats: (String) -> Unit,
+    onRefreshConversations: () -> Unit,
     onLoadContacts: () -> Unit,
     onSearchContacts: (String) -> Unit,
     onStartConversationForContact: (NewConversationContact) -> Unit,
@@ -101,35 +121,81 @@ fun ConversationsScreen(
     onDeleteConversationsQuick: (List<String>) -> Unit,
     actionStatus: String?
 ) {
-    var search by remember { mutableStateOf("") }
-    var tab by remember { mutableStateOf("all") }
+    val context = LocalContext.current
+    val prefs = remember {
+        context.getSharedPreferences("widers_conversation_filters", android.content.Context.MODE_PRIVATE)
+    }
+    var search by rememberSaveable { mutableStateOf(prefs.getString("search", "").orEmpty()) }
+    var tab by rememberSaveable { mutableStateOf(prefs.getString("tab", "all").orEmpty()) }
     var showNewConversationDialog by remember { mutableStateOf(false) }
     var tagPickerConversationId by remember { mutableStateOf<String?>(null) }
     var tagManageConversationId by remember { mutableStateOf<String?>(null) }
     var tagManageItem by remember { mutableStateOf<ConversationTag?>(null) }
     var swipedConversation by remember { mutableStateOf<Conversation?>(null) }
-    var readFilter by remember { mutableStateOf(ReadFilter.ALL) }
-    var selectedAgentName by remember { mutableStateOf<String?>(null) }
-    var selectedTagId by remember { mutableStateOf<Long?>(null) }
+    var readFilter by remember {
+        mutableStateOf(
+            runCatching { ReadFilter.valueOf(prefs.getString("readFilter", ReadFilter.ALL.name) ?: ReadFilter.ALL.name) }
+                .getOrDefault(ReadFilter.ALL)
+        )
+    }
+    var assignmentFilter by remember {
+        mutableStateOf(
+            runCatching { AssignmentFilter.valueOf(prefs.getString("assignmentFilter", AssignmentFilter.ALL.name) ?: AssignmentFilter.ALL.name) }
+                .getOrDefault(AssignmentFilter.ALL)
+        )
+    }
+    var satisfactionFilter by remember {
+        mutableStateOf(
+            runCatching { SatisfactionFilter.valueOf(prefs.getString("satisfactionFilter", SatisfactionFilter.ALL.name) ?: SatisfactionFilter.ALL.name) }
+                .getOrDefault(SatisfactionFilter.ALL)
+        )
+    }
+    var sortFilter by remember {
+        mutableStateOf(
+            runCatching { SortFilter.valueOf(prefs.getString("sortFilter", SortFilter.LATEST.name) ?: SortFilter.LATEST.name) }
+                .getOrDefault(SortFilter.LATEST)
+        )
+    }
+    var selectedTagId by remember {
+        mutableStateOf(prefs.getLong("selectedTagId", -1L).takeIf { it > 0 })
+    }
     var showReadFilterDialog by remember { mutableStateOf(false) }
-    var showAgentFilterDialog by remember { mutableStateOf(false) }
+    var showAssignmentFilterDialog by remember { mutableStateOf(false) }
+    var showSatisfactionFilterDialog by remember { mutableStateOf(false) }
+    var showSortFilterDialog by remember { mutableStateOf(false) }
     var showTagFilterDialog by remember { mutableStateOf(false) }
     var selectedConversationIds by remember { mutableStateOf(setOf<String>()) }
     var newName by remember { mutableStateOf("") }
     var newPhone by remember { mutableStateOf("") }
-    var contactSearch by remember { mutableStateOf("") }
+    var contactSearch by rememberSaveable { mutableStateOf("") }
     var tagPickerSearch by remember { mutableStateOf("") }
     var tagPickerSearchDebounced by remember { mutableStateOf("") }
+    var visibleConversationCount by rememberSaveable { mutableStateOf(30) }
+    var visibleContactCount by rememberSaveable { mutableStateOf(25) }
+    var isPullRefreshing by remember { mutableStateOf(false) }
+    val listState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
 
     LaunchedEffect(tagPickerSearch) {
         delay(220)
         tagPickerSearchDebounced = tagPickerSearch
     }
 
-    val agentChoices = remember(conversations) {
-        conversations.mapNotNull { it.assignedAgentName?.trim() }.filter { it.isNotBlank() }.distinct()
+    LaunchedEffect(search, tab, readFilter, assignmentFilter, satisfactionFilter, sortFilter, selectedTagId) {
+        prefs.edit()
+            .putString("search", search)
+            .putString("tab", tab)
+            .putString("readFilter", readFilter.name)
+            .putString("assignmentFilter", assignmentFilter.name)
+            .putString("satisfactionFilter", satisfactionFilter.name)
+            .putString("sortFilter", sortFilter.name)
+            .putLong("selectedTagId", selectedTagId ?: -1L)
+            .apply()
     }
-    val filtered = conversations.filter {
+    LaunchedEffect(conversations.size, actionStatus) {
+        if (isPullRefreshing) isPullRefreshing = false
+    }
+
+    val filteredBase = conversations.filter {
         val tabOk = when (tab) {
             "open" -> it.status == ConversationStatus.OPEN
             "closed" -> it.status == ConversationStatus.CLOSED
@@ -140,14 +206,38 @@ fun ConversationsScreen(
             ReadFilter.READ -> it.unreadCount == 0
             ReadFilter.UNREAD -> it.unreadCount > 0
         }
-        val agentOk = selectedAgentName.isNullOrBlank() || it.assignedAgentName == selectedAgentName
+        val assignmentOk = when (assignmentFilter) {
+            AssignmentFilter.ALL -> true
+            AssignmentFilter.MY -> it.assignedAgentName?.trim()?.equals(profileName.trim(), ignoreCase = true) == true
+            AssignmentFilter.UNASSIGNED -> it.assignedAgentName.isNullOrBlank()
+        }
+        val satisfactionOk = when (satisfactionFilter) {
+            SatisfactionFilter.ALL -> true
+            SatisfactionFilter.SATISFIED -> it.satisfaction == ConversationSatisfaction.SATISFIED
+            SatisfactionFilter.NEUTRAL -> it.satisfaction == ConversationSatisfaction.NEUTRAL
+            SatisfactionFilter.UNSATISFIED -> it.satisfaction == ConversationSatisfaction.UNSATISFIED
+            SatisfactionFilter.NO_RATING -> it.satisfaction == ConversationSatisfaction.NO_RATING
+        }
         val tagOk = selectedTagId == null || it.tags.any { tag -> tag.id == selectedTagId }
         val q = search.trim().lowercase()
-        tabOk && readOk && agentOk && tagOk &&
+        tabOk && readOk && assignmentOk && satisfactionOk && tagOk &&
             (q.isBlank() || it.customerName.lowercase().contains(q) || it.lastMessage.lowercase().contains(q))
+    }
+    val filtered = when (sortFilter) {
+        SortFilter.LATEST, SortFilter.UPDATED_NEWEST, SortFilter.CREATED_NEWEST -> filteredBase.sortedByDescending { it.lastMessageEpochMs }
+        SortFilter.UPDATED_OLDEST, SortFilter.CREATED_OLDEST -> filteredBase.sortedBy { it.lastMessageEpochMs }
     }
     val selectionMode = selectedConversationIds.isNotEmpty()
     val totalUnread = conversations.sumOf { it.unreadCount }
+
+    LaunchedEffect(filtered.size) {
+        if (filtered.size < visibleConversationCount) {
+            visibleConversationCount = filtered.size.coerceAtLeast(30)
+        }
+        if (visibleConversationCount <= 0) {
+            visibleConversationCount = 30
+        }
+    }
 
     Column(modifier = modifier.fillMaxSize()) {
         Column(
@@ -190,27 +280,6 @@ fun ConversationsScreen(
                             TextButton(onClick = { selectedConversationIds = emptySet() }) {
                                 Text(if (locale == AppLocale.AR) "إلغاء" else "Cancel")
                             }
-                            Surface(
-                                shape = RoundedCornerShape(999.dp),
-                                color = Color(0xFFDC2626).copy(alpha = 0.12f),
-                                modifier = Modifier.clickable {
-                                    onDeleteConversationsQuick(selectedConversationIds.toList())
-                                    selectedConversationIds = emptySet()
-                                }
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(Icons.Outlined.Delete, null, tint = Color(0xFFDC2626))
-                                    Spacer(Modifier.size(4.dp))
-                                    Text(
-                                        if (locale == AppLocale.AR) "إزالة" else "Remove",
-                                        color = Color(0xFFDC2626),
-                                        style = MaterialTheme.typography.labelLarge
-                                    )
-                                }
-                            }
                         }
                     }
                 } else {
@@ -236,11 +305,23 @@ fun ConversationsScreen(
                             .clickable {
                                 showNewConversationDialog = true
                                 contactSearch = ""
+                                visibleContactCount = 25
                                 onLoadContacts()
                             },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(Icons.Outlined.ChatBubbleOutline, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.secondary)
+                            .clickable { onRefreshConversations() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(if (locale == AppLocale.AR) "↻" else "↻", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -307,11 +388,69 @@ fun ConversationsScreen(
                         onClick = { showReadFilterDialog = true }
                     )
                     TabChip(
-                        label = if (locale == AppLocale.AR) "الوكيل: ${selectedAgentName ?: "الكل"}" else "Agent: ${selectedAgentName ?: "All"}",
-                        count = agentChoices.size,
-                        selected = selectedAgentName != null,
+                        label = if (locale == AppLocale.AR) {
+                            when (assignmentFilter) {
+                                AssignmentFilter.ALL -> "التعيين: الكل"
+                                AssignmentFilter.MY -> "التعيين: محادثاتي"
+                                AssignmentFilter.UNASSIGNED -> "التعيين: غير معين"
+                            }
+                        } else {
+                            when (assignmentFilter) {
+                                AssignmentFilter.ALL -> "Assignment: All"
+                                AssignmentFilter.MY -> "Assignment: My conversations"
+                                AssignmentFilter.UNASSIGNED -> "Assignment: Unassigned"
+                            }
+                        },
+                        count = conversations.size,
+                        selected = assignmentFilter != AssignmentFilter.ALL,
                         showCaret = true,
-                        onClick = { showAgentFilterDialog = true }
+                        onClick = { showAssignmentFilterDialog = true }
+                    )
+                    TabChip(
+                        label = if (locale == AppLocale.AR) {
+                            when (satisfactionFilter) {
+                                SatisfactionFilter.ALL -> "الرضا: الكل"
+                                SatisfactionFilter.SATISFIED -> "الرضا: راضٍ"
+                                SatisfactionFilter.NEUTRAL -> "الرضا: محايد"
+                                SatisfactionFilter.UNSATISFIED -> "الرضا: غير راضٍ"
+                                SatisfactionFilter.NO_RATING -> "الرضا: بدون تقييم"
+                            }
+                        } else {
+                            when (satisfactionFilter) {
+                                SatisfactionFilter.ALL -> "Satisfaction: All"
+                                SatisfactionFilter.SATISFIED -> "Satisfaction: Satisfied"
+                                SatisfactionFilter.NEUTRAL -> "Satisfaction: Neutral"
+                                SatisfactionFilter.UNSATISFIED -> "Satisfaction: Unsatisfied"
+                                SatisfactionFilter.NO_RATING -> "Satisfaction: No rating"
+                            }
+                        },
+                        count = conversations.size,
+                        selected = satisfactionFilter != SatisfactionFilter.ALL,
+                        showCaret = true,
+                        onClick = { showSatisfactionFilterDialog = true }
+                    )
+                    TabChip(
+                        label = if (locale == AppLocale.AR) {
+                            when (sortFilter) {
+                                SortFilter.LATEST -> "الترتيب: الأحدث"
+                                SortFilter.CREATED_NEWEST -> "الترتيب: إنشاء (الأحدث)"
+                                SortFilter.CREATED_OLDEST -> "الترتيب: إنشاء (الأقدم)"
+                                SortFilter.UPDATED_NEWEST -> "الترتيب: تحديث (الأحدث)"
+                                SortFilter.UPDATED_OLDEST -> "الترتيب: تحديث (الأقدم)"
+                            }
+                        } else {
+                            when (sortFilter) {
+                                SortFilter.LATEST -> "Sort: Latest"
+                                SortFilter.CREATED_NEWEST -> "Sort: Created (Newest)"
+                                SortFilter.CREATED_OLDEST -> "Sort: Created (Oldest)"
+                                SortFilter.UPDATED_NEWEST -> "Sort: Updated (Newest)"
+                                SortFilter.UPDATED_OLDEST -> "Sort: Updated (Oldest)"
+                            }
+                        },
+                        count = filtered.size,
+                        selected = sortFilter != SortFilter.LATEST,
+                        showCaret = true,
+                        onClick = { showSortFilterDialog = true }
                     )
                     TabChip(
                         label = if (locale == AppLocale.AR) "الوسم: ${selectedTagId ?: "الكل"}" else "Tag: ${selectedTagId ?: "All"}",
@@ -321,26 +460,40 @@ fun ConversationsScreen(
                         onClick = { showTagFilterDialog = true }
                     )
                 }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    if (locale == AppLocale.AR) "عدد النتائج: ${filtered.size}" else "Result count: ${filtered.size}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             } else {
                 Spacer(Modifier.height(8.dp))
             }
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.28f))
 
-        if (filtered.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(tr(locale, TextKey.NO_CONVERSATIONS), fontWeight = FontWeight.SemiBold)
-                    Text(
-                        tr(locale, TextKey.NO_CONVERSATIONS_DESC),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+        PullToRefreshBox(
+            isRefreshing = isPullRefreshing,
+            onRefresh = {
+                isPullRefreshing = true
+                onRefreshConversations()
+            },
+            modifier = Modifier.fillMaxSize()
+        ) {
+            if (filtered.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(tr(locale, TextKey.NO_CONVERSATIONS), fontWeight = FontWeight.SemiBold)
+                        Text(
+                            tr(locale, TextKey.NO_CONVERSATIONS_DESC),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
-            }
-        } else {
-            LazyColumn {
-                items(filtered, key = { it.id }) { convo ->
+            } else {
+                LazyColumn(state = listState) {
+                    items(filtered.take(visibleConversationCount), key = { it.id }) { convo ->
                     val isSelected = selectedConversationIds.contains(convo.id)
                     val markReadAction = convo.unreadCount > 0
                     val dismissState = rememberSwipeToDismissBoxState(
@@ -478,6 +631,26 @@ fun ConversationsScreen(
                                         modifier = Modifier.padding(start = 72.dp, end = 16.dp)
                                     )
                                 }
+                            }
+                        }
+                    }
+                }
+                    if (visibleConversationCount < filtered.size) {
+                        item(key = "load-more-conversations") {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 12.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    if (locale == AppLocale.AR) "جارٍ تحميل المزيد..." else "Loading more...",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            LaunchedEffect(visibleConversationCount, filtered.size) {
+                                visibleConversationCount = (visibleConversationCount + 30).coerceAtMost(filtered.size)
                             }
                         }
                     }
@@ -650,6 +823,7 @@ fun ConversationsScreen(
                         value = contactSearch,
                         onValueChange = {
                             contactSearch = it
+                            visibleContactCount = 25
                             onSearchContacts(it)
                         },
                         singleLine = true,
@@ -687,7 +861,7 @@ fun ConversationsScreen(
                                     .fillMaxWidth()
                                     .heightIn(min = 160.dp, max = 320.dp)
                             ) {
-                                items(filteredContacts, key = { it.id }) { item ->
+                                items(filteredContacts.take(visibleContactCount), key = { it.id }) { item ->
                                     HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
                                     Row(
                                         modifier = Modifier
@@ -714,6 +888,25 @@ fun ConversationsScreen(
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             maxLines = 1
                                         )
+                                    }
+                                }
+                                if (visibleContactCount < filteredContacts.size) {
+                                    item(key = "load-more-contacts") {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 10.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                if (locale == AppLocale.AR) "تحميل المزيد من جهات الاتصال..." else "Loading more contacts...",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        LaunchedEffect(visibleContactCount, filteredContacts.size) {
+                                            visibleContactCount = (visibleContactCount + 25).coerceAtMost(filteredContacts.size)
+                                        }
                                     }
                                 }
                             }
@@ -764,21 +957,93 @@ fun ConversationsScreen(
         )
     }
 
-    if (showAgentFilterDialog) {
+    if (showAssignmentFilterDialog) {
         AlertDialog(
-            onDismissRequest = { showAgentFilterDialog = false },
-            title = { Text(if (locale == AppLocale.AR) "تصفية الوكيل" else "Agent filter") },
+            onDismissRequest = { showAssignmentFilterDialog = false },
+            title = { Text(if (locale == AppLocale.AR) "تصفية التعيين" else "Assignment filter") },
             text = {
                 Column {
-                    TextButton(onClick = {
-                        selectedAgentName = null
-                        showAgentFilterDialog = false
-                    }) { Text(if (locale == AppLocale.AR) "الكل" else "All") }
-                    agentChoices.forEach { agent ->
+                    listOf(AssignmentFilter.ALL, AssignmentFilter.MY, AssignmentFilter.UNASSIGNED).forEach { option ->
                         TextButton(onClick = {
-                            selectedAgentName = agent
-                            showAgentFilterDialog = false
-                        }) { Text(agent) }
+                            assignmentFilter = option
+                            showAssignmentFilterDialog = false
+                        }) {
+                            Text(
+                                when (option) {
+                                    AssignmentFilter.ALL -> if (locale == AppLocale.AR) "الكل" else "All"
+                                    AssignmentFilter.MY -> if (locale == AppLocale.AR) "محادثاتي" else "My conversations"
+                                    AssignmentFilter.UNASSIGNED -> if (locale == AppLocale.AR) "غير معين" else "Unassigned"
+                                }
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {}
+        )
+    }
+
+    if (showSatisfactionFilterDialog) {
+        AlertDialog(
+            onDismissRequest = { showSatisfactionFilterDialog = false },
+            title = { Text(if (locale == AppLocale.AR) "تصفية الرضا" else "Satisfaction filter") },
+            text = {
+                Column {
+                    listOf(
+                        SatisfactionFilter.ALL,
+                        SatisfactionFilter.SATISFIED,
+                        SatisfactionFilter.NEUTRAL,
+                        SatisfactionFilter.UNSATISFIED,
+                        SatisfactionFilter.NO_RATING
+                    ).forEach { option ->
+                        TextButton(onClick = {
+                            satisfactionFilter = option
+                            showSatisfactionFilterDialog = false
+                        }) {
+                            Text(
+                                when (option) {
+                                    SatisfactionFilter.ALL -> if (locale == AppLocale.AR) "الكل" else "All"
+                                    SatisfactionFilter.SATISFIED -> if (locale == AppLocale.AR) "راضٍ" else "Satisfied"
+                                    SatisfactionFilter.NEUTRAL -> if (locale == AppLocale.AR) "محايد" else "Neutral"
+                                    SatisfactionFilter.UNSATISFIED -> if (locale == AppLocale.AR) "غير راضٍ" else "Unsatisfied"
+                                    SatisfactionFilter.NO_RATING -> if (locale == AppLocale.AR) "بدون تقييم" else "No rating"
+                                }
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {}
+        )
+    }
+
+    if (showSortFilterDialog) {
+        AlertDialog(
+            onDismissRequest = { showSortFilterDialog = false },
+            title = { Text(if (locale == AppLocale.AR) "الترتيب" else "Sorting") },
+            text = {
+                Column {
+                    listOf(
+                        SortFilter.LATEST,
+                        SortFilter.CREATED_NEWEST,
+                        SortFilter.CREATED_OLDEST,
+                        SortFilter.UPDATED_NEWEST,
+                        SortFilter.UPDATED_OLDEST
+                    ).forEach { option ->
+                        TextButton(onClick = {
+                            sortFilter = option
+                            showSortFilterDialog = false
+                        }) {
+                            Text(
+                                when (option) {
+                                    SortFilter.LATEST -> if (locale == AppLocale.AR) "الأحدث" else "Latest"
+                                    SortFilter.CREATED_NEWEST -> if (locale == AppLocale.AR) "إنشاء (الأحدث)" else "Created (Newest)"
+                                    SortFilter.CREATED_OLDEST -> if (locale == AppLocale.AR) "إنشاء (الأقدم)" else "Created (Oldest)"
+                                    SortFilter.UPDATED_NEWEST -> if (locale == AppLocale.AR) "تحديث (الأحدث)" else "Updated (Newest)"
+                                    SortFilter.UPDATED_OLDEST -> if (locale == AppLocale.AR) "تحديث (الأقدم)" else "Updated (Oldest)"
+                                }
+                            )
+                        }
                     }
                 }
             },
@@ -1079,13 +1344,21 @@ private fun ConversationRow(
 
         Column(modifier = Modifier.weight(1f)) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(
-                    convo.customerName,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = if (convo.unreadCount > 0) FontWeight.SemiBold else FontWeight.Medium
-                )
+                Row(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        modifier = Modifier.weight(1f, fill = false),
+                        text = convo.customerName,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = if (convo.unreadCount > 0) FontWeight.SemiBold else FontWeight.Medium
+                    )
+                    SatisfactionBadge(satisfaction = convo.satisfaction, locale = locale)
+                }
                 Text(
                     convo.lastMessageTime,
                     style = MaterialTheme.typography.labelSmall,
@@ -1127,7 +1400,7 @@ private fun ConversationRow(
             if (convo.tags.isNotEmpty()) {
                 Spacer(Modifier.height(4.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    convo.tags.take(1).forEach { tag ->
+                    convo.tags.take(3).forEach { tag ->
                         Surface(
                             shape = RoundedCornerShape(8.dp),
                             color = parseHexColor(tag.colorHex),
@@ -1159,9 +1432,9 @@ private fun ConversationRow(
                             }
                         }
                     }
-                    if (convo.tags.size > 1) {
+                    if (convo.tags.size > 3) {
                         Text(
-                            "+${convo.tags.size - 1}",
+                            "+${convo.tags.size - 3}",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

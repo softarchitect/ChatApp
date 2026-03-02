@@ -48,8 +48,17 @@ class WidersApiService(
             .put("order_by", orderBy)
     )
 
-    fun getContactsList(session: SessionContext): JSONObject =
-        getWithQuery("/api/wpbox/getContacts", sessionPayload(session))
+    fun getContactsList(
+        session: SessionContext,
+        page: Int = 1,
+        limit: Int = 25
+    ): JSONObject =
+        getWithQuery(
+            "/api/wpbox/getContacts",
+            sessionPayload(session)
+                .put("page", page)
+                .put("limit", limit)
+        )
 
     fun getTemplatesList(session: SessionContext): JSONObject =
         getWithQuery("/api/setup/templates", sessionPayload(session))

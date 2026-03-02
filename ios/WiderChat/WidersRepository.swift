@@ -45,34 +45,50 @@ final class WidersRepository: ChatRepository {
     func getConversations() async -> [Conversation] {
         guard let session else { return [] }
         do {
-            let response = try await api.getChatsList(session: session)
-            let rows = response.firstArray(keys: ["conversations", "chats", "data", "rows", "result"])
-            let mapped: [Conversation] = rows.compactMap { item in
-                guard let id = item.firstString(keys: ["contact_id", "id", "conversation_id"]) else { return nil }
-                let statusRaw = (item["chats_status"] as? [String: Any])?.firstInt(keys: ["is_open"]) == 0 ? "closed" : (item.firstString(keys: ["status"]) ?? "open")
-                let assignedAgentName = (item["agent"] as? [String: Any])?.firstString(keys: ["name", "full_name", "username"])
-                let tags = parseConversationTags(item)
-                return Conversation(
-                    id: id,
-                    customerName: item.firstString(keys: ["name", "customer_name", "contact_name", "title"]) ?? "Customer",
-                    customerPhone: item.firstString(keys: ["phone", "contact_phone", "wa_id", "number"]) ?? "",
-                    lastMessage: sanitizeConversationPreview(item.firstString(keys: ["last_message", "last_value", "value", "text", "body"]) ?? ""),
-                    lastMessageTime: formatApiDateTime(item.firstString(keys: ["updated_at", "last_reply_at", "last_message_time", "created_at", "time"]) ?? ""),
-                    unreadCount: {
-                        let rawUnread = item.firstInt(keys: ["unread_messages", "unread_count", "unread"]) ?? 0
-                        let isReaded = (item["chats_status"] as? [String: Any])?.firstBool(keys: ["is_readed"]) ?? item.firstBool(keys: ["is_readed"])
-                        if isReaded == true { return 0 }
-                        if isReaded == false { return rawUnread > 0 ? rawUnread : 1 }
-                        return rawUnread
-                    }(),
-                    status: statusRaw == "closed" ? .closed : .open,
-                    isOnline: item.firstBool(keys: ["is_online", "online"]) ?? false,
-                    assignedAgentName: assignedAgentName,
-                    tags: tags
-                )
+            var page = 1
+            let pageSize = 30
+            let maxPages = 120
+            var allMapped: [Conversation] = []
+            while page <= maxPages {
+                let response = try await api.getChatsList(session: session, page: page, limit: pageSize)
+                let rows = response.firstArray(keys: ["conversations", "chats", "data", "rows", "result"])
+                let mapped: [Conversation] = rows.compactMap { item in
+                    guard let id = item.firstString(keys: ["contact_id", "id", "conversation_id"]) else { return nil }
+                    let statusRaw = (item["chats_status"] as? [String: Any])?.firstInt(keys: ["is_open"]) == 0 ? "closed" : (item.firstString(keys: ["status"]) ?? "open")
+                    let assignedAgentName = (item["agent"] as? [String: Any])?.firstString(keys: ["name", "full_name", "username"])
+                    let tags = parseConversationTags(item)
+                    let rawLastTime = item.firstString(keys: ["updated_at", "last_reply_at", "last_message_time", "created_at", "time"]) ?? ""
+                    let satisfaction = parseConversationSatisfaction(item)
+                    return Conversation(
+                        id: id,
+                        customerName: item.firstString(keys: ["name", "customer_name", "contact_name", "title"]) ?? "Customer",
+                        customerPhone: item.firstString(keys: ["phone", "contact_phone", "wa_id", "number"]) ?? "",
+                        lastMessage: sanitizeConversationPreview(item.firstString(keys: ["last_message", "last_value", "value", "text", "body"]) ?? ""),
+                        lastMessageTime: formatApiDateTime(rawLastTime),
+                        lastMessageEpochMs: parseApiEpochMs(rawLastTime),
+                        satisfaction: satisfaction,
+                        unreadCount: {
+                            let rawUnread = item.firstInt(keys: ["unread_messages", "unread_count", "unread"]) ?? 0
+                            let isReaded = (item["chats_status"] as? [String: Any])?.firstBool(keys: ["is_readed"]) ?? item.firstBool(keys: ["is_readed"])
+                            if isReaded == true { return 0 }
+                            if isReaded == false { return rawUnread > 0 ? rawUnread : 1 }
+                            return rawUnread
+                        }(),
+                        status: statusRaw == "closed" ? .closed : .open,
+                        isOnline: item.firstBool(keys: ["is_online", "online"]) ?? false,
+                        assignedAgentName: assignedAgentName,
+                        tags: tags
+                    )
+                }
+                if mapped.isEmpty { break }
+                allMapped.append(contentsOf: mapped)
+                if mapped.count < pageSize { break }
+                page += 1
             }
-            conversationsCache = mapped
-            return mapped
+            var seen = Set<String>()
+            let deduped = allMapped.filter { seen.insert($0.id).inserted }
+            conversationsCache = deduped
+            return deduped
         } catch {
             return []
         }
@@ -206,10 +222,20 @@ final class WidersRepository: ChatRepository {
     // Full endpoint coverage from Postman collection.
     func getContactsList() async -> [String: Any]? {
         guard let session else { return nil }
-        guard let payload = try? await api.getContactsList(session: session) else { return nil }
-        let rows = payload.firstArray(keys: ["contacts", "data", "rows", "result"])
+        var mergedRows: [[String: Any]] = []
+        var page = 1
+        let pageSize = 25
+        let maxPages = 120
+        while page <= maxPages {
+            guard let payload = try? await api.getContactsList(session: session, page: page, limit: pageSize) else { break }
+            let rows = payload.firstArray(keys: ["contacts", "data", "rows", "result"])
+            if rows.isEmpty { break }
+            mergedRows.append(contentsOf: rows)
+            if rows.count < pageSize { break }
+            page += 1
+        }
         var map: [String: String] = [:]
-        for item in rows {
+        for item in mergedRows {
             guard let id = item.firstString(keys: ["id", "contact_id"]),
                   let phone = item.firstString(keys: ["phone", "wa_id", "number"]),
                   !phone.isEmpty
@@ -217,7 +243,7 @@ final class WidersRepository: ChatRepository {
             map[id] = phone
         }
         contactPhonesById = map
-        return payload
+        return ["contacts": mergedRows]
     }
     func getTemplatesList() async -> [String: Any]? { guard let session else { return nil }; return try? await api.getTemplatesList(session: session) }
     func getTagsList() async -> [String: Any]? { guard let session else { return nil }; return try? await api.getTagsList(session: session) }
@@ -351,5 +377,53 @@ private func formatApiDateTime(_ value: String) -> String {
         }
     }
     return value
+}
+
+private func parseApiEpochMs(_ value: String) -> Int64 {
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return 0 }
+    let patterns = [
+        "yyyy-MM-dd'T'HH:mm:ss.SSSSSS'Z'",
+        "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+        "yyyy-MM-dd HH:mm:ss",
+        "yyyy-MM-dd'T'HH:mm:ss'Z'"
+    ]
+    for pattern in patterns {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = pattern
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        if let date = formatter.date(from: trimmed) {
+            return Int64(date.timeIntervalSince1970 * 1000)
+        }
+    }
+    return 0
+}
+
+private func parseConversationSatisfaction(_ item: [String: Any]) -> ConversationSatisfaction {
+    let top = item.firstString(keys: [
+        "satisfaction",
+        "satisfaction_status",
+        "customer_satisfaction",
+        "rating_label",
+        "csat",
+        "sentiment"
+    ])
+    let nested = (item["rating"] as? [String: Any])?.firstString(keys: ["status", "label", "name"])
+        ?? (item["satisfaction"] as? [String: Any])?.firstString(keys: ["status", "label", "name"])
+    let raw = (nested ?? top ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    if raw.isEmpty || raw == "all" || raw == "none" || raw == "null" {
+        return .noRating
+    }
+    if raw.contains("satisfied") || raw == "happy" || raw == "positive" || raw == "1" {
+        return .satisfied
+    }
+    if raw.contains("neutral") || raw == "0" || raw == "normal" {
+        return .neutral
+    }
+    if raw.contains("unsatisfied") || raw.contains("angry") || raw == "-1" || raw == "negative" {
+        return .unsatisfied
+    }
+    return .noRating
 }
 

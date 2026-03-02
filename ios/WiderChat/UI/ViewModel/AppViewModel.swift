@@ -76,6 +76,7 @@ final class AppViewModel: ObservableObject {
     @Published var profileName = ""
     @Published var profileEmail = ""
     private var localOutgoingByConversation: [String: [ChatMessage]] = [:]
+    private var chatPollingTask: Task<Void, Never>?
 
     private let repository: ChatRepository
     private let secureStore: SecureSessionStore
@@ -128,6 +129,7 @@ final class AppViewModel: ObservableObject {
     }
 
     func logout() {
+        stopChatPolling()
         secureStore.removeValue(for: SessionKeys.token)
         secureStore.removeValue(for: SessionKeys.companyId)
         isLoggedIn = false
@@ -148,6 +150,7 @@ final class AppViewModel: ObservableObject {
     }
 
     func openChat(id: String) {
+        stopChatPolling()
         activeChatId = id
         screen = .chat
         activeMessages = []
@@ -177,15 +180,21 @@ final class AppViewModel: ObservableObject {
                 if updated.id == id { updated.unreadCount = 0 }
                 return updated
             }
+            startChatPolling(id: id)
         }
     }
 
     func backToConversations() {
+        stopChatPolling()
         screen = .conversations
         isChatLoading = false
         Task { @MainActor in
             conversations = await repository.getConversations()
         }
+    }
+
+    func refreshConversationsList() async {
+        conversations = await repository.getConversations()
     }
 
     func setScreen(_ next: AppScreen) {
@@ -747,6 +756,24 @@ final class AppViewModel: ObservableObject {
         formatter.dateFormat = "h:mm a"
         formatter.locale = Locale(identifier: locale == .ar ? "ar_SA" : "en_US_POSIX")
         return formatter.string(from: Date())
+    }
+
+    private func startChatPolling(id: String) {
+        chatPollingTask?.cancel()
+        chatPollingTask = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                guard activeChatId == id, screen == .chat else { break }
+                let remote = await repository.getMessages(conversationId: id)
+                activeMessages = mergeWithLocalOutgoing(conversationId: id, remote: remote)
+                conversations = await repository.getConversations()
+            }
+        }
+    }
+
+    private func stopChatPolling() {
+        chatPollingTask?.cancel()
+        chatPollingTask = nil
     }
 
     private func parseNewConversationContacts(_ payload: [String: Any]) -> [NewConversationContact] {

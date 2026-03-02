@@ -5,6 +5,7 @@ import com.widers.widerchat.data.remote.SessionContext
 import com.widers.widerchat.data.remote.WidersApiService
 import com.widers.widerchat.domain.model.ChatMessage
 import com.widers.widerchat.domain.model.Conversation
+import com.widers.widerchat.domain.model.ConversationSatisfaction
 import com.widers.widerchat.domain.model.ConversationTag
 import com.widers.widerchat.domain.model.ConversationStatus
 import com.widers.widerchat.domain.model.MessageDeliveryStatus
@@ -66,60 +67,23 @@ class NetworkChatRepository(
 
     override suspend fun getConversations(): List<Conversation> {
         val activeSession = session ?: return emptyList()
-        val response = api.getChatsList(activeSession)
-        val items = response.firstArray(
-            "conversations",
-            "chats",
-            "data",
-            "rows",
-            "result"
-        ) ?: emptyArrayFrom(response)
-
-        val mapped = buildList {
-            for (i in 0 until items.length()) {
-                val item = items.optJSONObject(i) ?: continue
-                val id = item.firstString("contact_id", "id", "conversation_id") ?: continue
-                val customerName = item.firstString("name", "customer_name", "contact_name", "title") ?: "Customer"
-                val phone = item.firstString("phone", "contact_phone", "wa_id", "number").orEmpty()
-                val lastMessageRaw = item.firstString("last_message", "last_value", "value", "text", "body").orEmpty()
-                val lastMessage = sanitizeConversationPreview(lastMessageRaw)
-                val lastMessageTime = item.firstString("updated_at", "last_reply_at", "last_message_time", "created_at", "time")
-                    ?.let(::formatApiDateTime)
-                    .orEmpty()
-                val statusObj = item.optJSONObject("chats_status")
-                val isReaded = statusObj?.firstBoolean("is_readed")
-                    ?: item.firstBoolean("is_readed")
-                val rawUnread = item.firstInt("unread_messages", "unread_count", "unread").coerceAtLeast(0)
-                val unreadCount = when (isReaded) {
-                    true -> 0
-                    false -> if (rawUnread > 0) rawUnread else 1
-                    null -> rawUnread
-                }
-                val isOpen = statusObj?.firstBoolean("is_open")
-                    ?: item.firstBoolean("open", "is_open")
-                    ?: (item.firstString("status") != "closed")
-                val agentName = item.optJSONObject("agent")
-                    ?.firstString("name", "full_name", "username")
-                val tags = parseConversationTags(item)
-
-                add(
-                    Conversation(
-                        id = id,
-                        customerName = customerName,
-                        customerPhone = phone,
-                        lastMessage = lastMessage,
-                        lastMessageTime = lastMessageTime,
-                        unreadCount = unreadCount,
-                        status = if (isOpen) ConversationStatus.OPEN else ConversationStatus.CLOSED,
-                        isOnline = item.firstBoolean("is_online", "online") ?: false,
-                        assignedAgentName = agentName,
-                        tags = tags
-                    )
-                )
-            }
+        val mapped = mutableListOf<Conversation>()
+        var page = 1
+        val pageSize = 30
+        val maxPages = 120
+        while (page <= maxPages) {
+            val response = api.getChatsList(activeSession, page = page, limit = pageSize)
+            val pageItems = response.firstArray("conversations", "chats", "data", "rows", "result")
+                ?: emptyArrayFrom(response)
+            val parsed = parseConversationRows(pageItems)
+            if (parsed.isEmpty()) break
+            mapped += parsed
+            if (parsed.size < pageSize) break
+            page += 1
         }
-        cacheConversations = mapped
-        return mapped
+        val deduped = mapped.distinctBy { it.id }
+        cacheConversations = deduped
+        return deduped
     }
 
     override suspend fun getMessages(conversationId: String): List<ChatMessage> {
@@ -254,17 +218,30 @@ class NetworkChatRepository(
 
     // Full endpoint coverage from Postman collection.
     suspend fun getContacts(): JSONObject? {
-        val payload = session?.let(api::getContactsList) ?: return null
-        val contacts = payload.firstArray("contacts", "data", "rows", "result") ?: JSONArray()
+        val activeSession = session ?: return null
+        val merged = JSONArray()
+        var page = 1
+        val pageSize = 25
+        val maxPages = 120
+        while (page <= maxPages) {
+            val payload = api.getContactsList(activeSession, page = page, limit = pageSize)
+            val contacts = payload.firstArray("contacts", "data", "rows", "result") ?: JSONArray()
+            if (contacts.length() == 0) break
+            for (i in 0 until contacts.length()) {
+                merged.put(contacts.optJSONObject(i) ?: continue)
+            }
+            if (contacts.length() < pageSize) break
+            page += 1
+        }
         val cache = mutableMapOf<String, String>()
-        for (i in 0 until contacts.length()) {
-            val item = contacts.optJSONObject(i) ?: continue
+        for (i in 0 until merged.length()) {
+            val item = merged.optJSONObject(i) ?: continue
             val id = item.firstString("id", "contact_id") ?: continue
             val phone = item.firstString("phone", "wa_id", "number") ?: continue
             if (phone.isNotBlank()) cache[id] = phone
         }
         cacheContactsById = cache
-        return payload
+        return JSONObject().put("contacts", merged)
     }
     suspend fun getTemplates() = session?.let(api::getTemplatesList)
     suspend fun getTags() = session?.let(api::getTagsList)
@@ -315,6 +292,76 @@ class NetworkChatRepository(
     }
 
     fun currentUserSnapshot(): Pair<String?, String?> = sessionUserName to sessionUserEmail
+}
+
+private fun parseConversationRows(items: JSONArray): List<Conversation> = buildList {
+    for (i in 0 until items.length()) {
+        val item = items.optJSONObject(i) ?: continue
+        val id = item.firstString("contact_id", "id", "conversation_id") ?: continue
+        val customerName = item.firstString("name", "customer_name", "contact_name", "title") ?: "Customer"
+        val phone = item.firstString("phone", "contact_phone", "wa_id", "number").orEmpty()
+        val lastMessageRaw = item.firstString("last_message", "last_value", "value", "text", "body").orEmpty()
+        val lastMessage = sanitizeConversationPreview(lastMessageRaw)
+        val rawLastTime = item.firstString("updated_at", "last_reply_at", "last_message_time", "created_at", "time").orEmpty()
+        val lastMessageTime = rawLastTime.let(::formatApiDateTime)
+        val lastMessageEpochMs = parseApiEpochMillis(rawLastTime)
+        val statusObj = item.optJSONObject("chats_status")
+        val isReaded = statusObj?.firstBoolean("is_readed")
+            ?: item.firstBoolean("is_readed")
+        val rawUnread = item.firstInt("unread_messages", "unread_count", "unread").coerceAtLeast(0)
+        val unreadCount = when (isReaded) {
+            true -> 0
+            false -> if (rawUnread > 0) rawUnread else 1
+            null -> rawUnread
+        }
+        val isOpen = statusObj?.firstBoolean("is_open")
+            ?: item.firstBoolean("open", "is_open")
+            ?: (item.firstString("status") != "closed")
+        val agentName = item.optJSONObject("agent")
+            ?.firstString("name", "full_name", "username")
+        val tags = parseConversationTags(item)
+        val satisfaction = parseConversationSatisfaction(item)
+
+        add(
+            Conversation(
+                id = id,
+                customerName = customerName,
+                customerPhone = phone,
+                lastMessage = lastMessage,
+                lastMessageTime = lastMessageTime,
+                lastMessageEpochMs = lastMessageEpochMs,
+                unreadCount = unreadCount,
+                status = if (isOpen) ConversationStatus.OPEN else ConversationStatus.CLOSED,
+                isOnline = item.firstBoolean("is_online", "online") ?: false,
+                assignedAgentName = agentName,
+                tags = tags,
+                satisfaction = satisfaction
+            )
+        )
+    }
+}
+
+private fun parseConversationSatisfaction(item: JSONObject): ConversationSatisfaction {
+    val top = item.firstString(
+        "satisfaction",
+        "satisfaction_status",
+        "customer_satisfaction",
+        "rating_label",
+        "csat",
+        "sentiment"
+    )
+    val nested = item.optJSONObject("rating")?.firstString("status", "label", "name")
+        ?: item.optJSONObject("satisfaction")?.firstString("status", "label", "name")
+    val raw = (nested ?: top).orEmpty().trim().lowercase(Locale.US)
+    if (raw.isBlank() || raw == "all" || raw == "none" || raw == "null") {
+        return ConversationSatisfaction.NO_RATING
+    }
+    return when {
+        raw.contains("satisfied") || raw == "happy" || raw == "positive" || raw == "1" -> ConversationSatisfaction.SATISFIED
+        raw.contains("neutral") || raw == "0" || raw == "normal" -> ConversationSatisfaction.NEUTRAL
+        raw.contains("unsatisfied") || raw.contains("angry") || raw == "-1" || raw == "negative" -> ConversationSatisfaction.UNSATISFIED
+        else -> ConversationSatisfaction.NO_RATING
+    }
 }
 
 private fun parseConversationTags(item: JSONObject): List<ConversationTag> {
@@ -453,6 +500,28 @@ private fun formatApiDateTime(raw: String): String {
         }
     }
     return raw
+}
+
+private fun parseApiEpochMillis(raw: String): Long {
+    val value = raw.trim()
+    if (value.isEmpty()) return 0L
+    val inputPatterns = listOf(
+        "yyyy-MM-dd'T'HH:mm:ss.SSSSSS'Z'",
+        "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+        "yyyy-MM-dd HH:mm:ss",
+        "yyyy-MM-dd'T'HH:mm:ss'Z'"
+    )
+    inputPatterns.forEach { pattern ->
+        try {
+            val input = SimpleDateFormat(pattern, Locale.US).apply {
+                timeZone = TimeZone.getTimeZone("UTC")
+            }
+            val date = input.parse(value) ?: return@forEach
+            return date.time
+        } catch (_: Exception) {
+        }
+    }
+    return 0L
 }
 
 private fun JSONObject.extractDisplayContent(): String {

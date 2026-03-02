@@ -6,6 +6,8 @@ struct Conversation: Identifiable {
     let customerPhone: String
     var lastMessage: String
     var lastMessageTime: String
+    var lastMessageEpochMs: Int64
+    var satisfaction: ConversationSatisfaction
     var unreadCount: Int
     var status: ConversationStatus
     let isOnline: Bool
@@ -18,6 +20,8 @@ struct Conversation: Identifiable {
         customerPhone: String,
         lastMessage: String,
         lastMessageTime: String,
+        lastMessageEpochMs: Int64 = 0,
+        satisfaction: ConversationSatisfaction = .noRating,
         unreadCount: Int,
         status: ConversationStatus,
         isOnline: Bool,
@@ -29,6 +33,8 @@ struct Conversation: Identifiable {
         self.customerPhone = customerPhone
         self.lastMessage = lastMessage
         self.lastMessageTime = lastMessageTime
+        self.lastMessageEpochMs = lastMessageEpochMs
+        self.satisfaction = satisfaction
         self.unreadCount = unreadCount
         self.status = status
         self.isOnline = isOnline

@@ -23,6 +23,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.text.ClickableText
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.rememberScrollState
@@ -59,6 +61,7 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.NoteAlt
 import androidx.compose.material.icons.outlined.Pause
@@ -111,6 +114,10 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.core.content.ContextCompat
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.window.Dialog
@@ -134,6 +141,8 @@ import com.widers.widerchat.domain.model.Conversation
 import com.widers.widerchat.domain.model.ConversationStatus
 import com.widers.widerchat.domain.model.MessageSender
 import com.widers.widerchat.domain.model.MessageType
+import com.widers.widerchat.ui.components.SatisfactionBadge
+import com.widers.widerchat.ui.components.SatisfactionBadgeVariant
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -232,7 +241,6 @@ fun ChatScreen(
     var showReplyDialog by remember { mutableStateOf(false) }
     var showCustomDialog by remember { mutableStateOf(false) }
     var showUpdateContactDialog by remember { mutableStateOf(false) }
-    var showDeleteDialog by remember { mutableStateOf(false) }
     var showContactInfoDialog by remember { mutableStateOf(false) }
     var showMediaLinksDocsDialog by remember { mutableStateOf(false) }
     var browserImageUrl by remember { mutableStateOf<String?>(null) }
@@ -451,24 +459,30 @@ fun ChatScreen(
                 }
                 Spacer(Modifier.size(10.dp))
                 Column {
-                    Text(conversation.customerName, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(0.9f),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            modifier = Modifier.weight(1f, fill = false),
+                            text = conversation.customerName,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        SatisfactionBadge(
+                            satisfaction = conversation.satisfaction,
+                            locale = locale,
+                            variant = SatisfactionBadgeVariant.REGULAR
+                        )
+                    }
                     Text(
                         if (conversation.isOnline) tr(locale, TextKey.ONLINE) else "${tr(locale, TextKey.LAST_SEEN)} ${conversation.lastMessageTime}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-            }
-            IconButton(
-                onClick = {
-                    val ok = openDialer(context, conversation.customerPhone)
-                    if (!ok) {
-                        Toast.makeText(context, "Phone number is unavailable", Toast.LENGTH_SHORT).show()
-                    }
-                },
-                modifier = Modifier.size(36.dp)
-            ) {
-                Icon(Icons.Outlined.Call, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Box {
                 IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(36.dp)) { Icon(Icons.Outlined.MoreVert, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -604,13 +618,6 @@ fun ChatScreen(
                             menuOpen = false
                         }
                     )
-                    DropdownMenuItem(
-                        text = { Text(tr(locale, TextKey.DELETE_CHAT), color = Color(0xFFEF4444)) },
-                        onClick = {
-                            showDeleteDialog = true
-                            menuOpen = false
-                        }
-                    )
                 }
             }
         }
@@ -627,14 +634,20 @@ fun ChatScreen(
             }
         }
         if (!actionStatus.isNullOrBlank()) {
+            val isMetaWindowWarning = actionStatus.contains("24", ignoreCase = true) &&
+                actionStatus.contains("template", ignoreCase = true)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.secondary)
+                    .background(if (isMetaWindowWarning) Color(0xFFEF4444) else MaterialTheme.colorScheme.secondary)
                     .padding(vertical = 6.dp, horizontal = 10.dp),
                 contentAlignment = Alignment.CenterStart
             ) {
-                Text(actionStatus, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                Text(
+                    actionStatus,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (isMetaWindowWarning) Color.White else MaterialTheme.colorScheme.primary
+                )
             }
         }
 
@@ -869,12 +882,57 @@ fun ChatScreen(
                 .padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(
-                onClick = { showEmojiPicker = !showEmojiPicker },
-                modifier = Modifier.size(36.dp),
-                enabled = conversation.status == ConversationStatus.OPEN && !isHistoryLoading
+            val canRecordVoice = conversation.status == ConversationStatus.OPEN && !isHistoryLoading
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (isRecordingVoice) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.secondary
+                    )
+                    .pointerInput(canRecordVoice) {
+                        if (!canRecordVoice) return@pointerInput
+                        detectTapGestures(
+                            onPress = {
+                                val hasPermission = ContextCompat.checkSelfPermission(
+                                    context,
+                                    Manifest.permission.RECORD_AUDIO
+                                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                                if (hasPermission) {
+                                    beginVoiceRecording()
+                                } else {
+                                    audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                }
+                                tryAwaitRelease()
+                                val recorder = mediaRecorder
+                                val file = recordingFile
+                                try {
+                                    recorder?.stop()
+                                } catch (_: Exception) {
+                                }
+                                recorder?.release()
+                                mediaRecorder = null
+                                isRecordingVoice = false
+                                if (file != null && file.exists()) {
+                                    val bytes = file.readBytes()
+                                    if (bytes.isNotEmpty()) {
+                                        onSendVoice("voice-${System.currentTimeMillis()}.m4a", bytes)
+                                        forceAutoScroll = true
+                                    }
+                                    file.delete()
+                                }
+                                recordingFile = null
+                            }
+                        )
+                    },
+                contentAlignment = Alignment.Center
             ) {
-                Text("😀")
+                Icon(
+                    Icons.Outlined.Mic,
+                    null,
+                    tint = if (isRecordingVoice) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
             Box {
                 IconButton(
@@ -909,42 +967,6 @@ fun ChatScreen(
                             showAttachMenu = false
                         }
                     )
-                    DropdownMenuItem(
-                        text = { Text(if (isRecordingVoice) tr(locale, TextKey.STOP_SEND_VOICE) else tr(locale, TextKey.AUDIO)) },
-                        onClick = {
-                            if (isRecordingVoice) {
-                                val recorder = mediaRecorder
-                                val file = recordingFile
-                                try {
-                                    recorder?.stop()
-                                } catch (_: Exception) {
-                                }
-                                recorder?.release()
-                                mediaRecorder = null
-                                isRecordingVoice = false
-                                if (file != null && file.exists()) {
-                                    val bytes = file.readBytes()
-                                    if (bytes.isNotEmpty()) {
-                                        onSendVoice("voice-${System.currentTimeMillis()}.m4a", bytes)
-                                        forceAutoScroll = true
-                                    }
-                                    file.delete()
-                                }
-                                recordingFile = null
-                            } else {
-                                val hasPermission = ContextCompat.checkSelfPermission(
-                                    context,
-                                    Manifest.permission.RECORD_AUDIO
-                                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-                                if (hasPermission) {
-                                    beginVoiceRecording()
-                                } else {
-                                    audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                                }
-                            }
-                            showAttachMenu = false
-                        }
-                    )
                 }
             }
             OutlinedTextField(
@@ -967,7 +989,6 @@ fun ChatScreen(
                     onSend(text)
                     forceAutoScroll = true
                     text = ""
-                    showEmojiPicker = false
                 },
                 enabled = text.isNotBlank() && conversation.status == ConversationStatus.OPEN && !isHistoryLoading,
                 modifier = Modifier
@@ -976,6 +997,84 @@ fun ChatScreen(
                     .background(MaterialTheme.colorScheme.primary)
             ) {
                 Icon(Icons.AutoMirrored.Outlined.Send, null, tint = MaterialTheme.colorScheme.onPrimary)
+            }
+        }
+        val commandInput = text.trimStart()
+        val showSlashCommands = commandInput.startsWith("/")
+        val showAgentCommands = commandInput.startsWith("@")
+        val showTagCommands = commandInput.startsWith("#")
+        val commandQuery = commandInput.drop(1).trim().lowercase(Locale.US)
+        val filteredReplyCommands = if (!showSlashCommands) emptyList() else {
+            availableReplies.filter {
+                commandQuery.isBlank() ||
+                    it.name.lowercase(Locale.US).contains(commandQuery) ||
+                    it.text.lowercase(Locale.US).contains(commandQuery)
+            }.take(8)
+        }
+        val filteredAgentCommands = if (!showAgentCommands) emptyList() else {
+            availableAgents.filter {
+                commandQuery.isBlank() || it.name.lowercase(Locale.US).contains(commandQuery)
+            }.take(8)
+        }
+        val filteredTagCommands = if (!showTagCommands) emptyList() else {
+            availableTags.filter {
+                commandQuery.isBlank() || it.name.lowercase(Locale.US).contains(commandQuery)
+            }.take(8)
+        }
+        if (showSlashCommands || showAgentCommands || showTagCommands) {
+            ElevatedCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 200.dp)
+                ) {
+                    if (showSlashCommands) {
+                        items(filteredReplyCommands) { reply ->
+                            TextButton(
+                                onClick = {
+                                    onSendQuickReply(reply.id)
+                                    text = ""
+                                    forceAutoScroll = true
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
+                                    Text(reply.name, fontWeight = FontWeight.SemiBold)
+                                    Text(reply.text, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
+                    } else if (showAgentCommands) {
+                        items(filteredAgentCommands) { agent ->
+                            TextButton(
+                                onClick = {
+                                    onAssignAgent(agent.id)
+                                    text = ""
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(agent.name, modifier = Modifier.fillMaxWidth())
+                            }
+                        }
+                    } else if (showTagCommands) {
+                        items(filteredTagCommands) { tag ->
+                            TextButton(
+                                onClick = {
+                                    onAttachTag(tag.id)
+                                    text = ""
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(tag.name, modifier = Modifier.fillMaxWidth())
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -988,7 +1087,7 @@ fun ChatScreen(
             lastObservedMessageId = latest.id
         }
         if (messages.isNotEmpty() && (initialOpenScrollPending || isNearBottom || forceAutoScroll)) {
-            listState.animateScrollToItem(messages.size)
+            listState.animateScrollToItem((messages.lastIndex).coerceAtLeast(0))
             pendingNewMessages = 0
             initialOpenScrollPending = false
         }
@@ -1627,21 +1726,6 @@ fun ChatScreen(
         )
     }
 
-    if (showDeleteDialog) {
-        AlertDialog(
-            onDismissRequest = { showDeleteDialog = false },
-            title = { Text(tr(locale, TextKey.DELETE_CHAT_QUESTION)) },
-            text = { Text(tr(locale, TextKey.DELETE_CHAT_ENDPOINT_HINT)) },
-            dismissButton = { TextButton(onClick = { showDeleteDialog = false }) { Text(tr(locale, TextKey.CANCEL)) } },
-            confirmButton = {
-                TextButton(onClick = {
-                    onDeleteChat()
-                    showDeleteDialog = false
-                }) { Text(tr(locale, TextKey.DELETE), color = Color(0xFFEF4444)) }
-            }
-        )
-    }
-
     if (showContactInfoDialog) {
         AlertDialog(
             onDismissRequest = { showContactInfoDialog = false },
@@ -1706,18 +1790,10 @@ fun ChatScreen(
                 }
             },
             confirmButton = {
-                Row {
-                    TextButton(onClick = {
-                        onToggleStatus()
-                    }) {
-                        Text(if (conversation.status == ConversationStatus.OPEN) tr(locale, TextKey.CLOSE_CONVERSATION) else tr(locale, TextKey.REOPEN_CONVERSATION))
-                    }
-                    TextButton(onClick = {
-                        showContactInfoDialog = false
-                        showDeleteDialog = true
-                    }) {
-                        Text(tr(locale, TextKey.DELETE), color = Color(0xFFEF4444))
-                    }
+                TextButton(onClick = {
+                    onToggleStatus()
+                }) {
+                    Text(if (conversation.status == ConversationStatus.OPEN) tr(locale, TextKey.CLOSE_CONVERSATION) else tr(locale, TextKey.REOPEN_CONVERSATION))
                 }
             }
         )
@@ -2120,10 +2196,18 @@ private fun MessageBubble(msg: ChatMessage, darkMode: Boolean) {
                     )
                     if (msg.content.isNotBlank() && !msg.content.startsWith("[")) {
                         Spacer(Modifier.size(6.dp))
-                        Text(msg.content, color = messageColor)
+                        LinkifiedMessageText(
+                            text = msg.content,
+                            color = messageColor,
+                            uriHandler = uriHandler
+                        )
                     }
                 } else {
-                    Text(msg.content, color = messageColor)
+                    LinkifiedMessageText(
+                        text = msg.content,
+                        color = messageColor,
+                        uriHandler = uriHandler
+                    )
                 }
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(top = 3.dp),
@@ -2159,6 +2243,55 @@ private fun MessageBubble(msg: ChatMessage, darkMode: Boolean) {
         VideoPreviewDialog(
             videoUrl = previewVideoUrl!!,
             onDismiss = { previewVideoUrl = null }
+        )
+    }
+}
+
+@Composable
+private fun LinkifiedMessageText(
+    text: String,
+    color: Color,
+    uriHandler: androidx.compose.ui.platform.UriHandler
+) {
+    val linkColor = Color(0xFF2563EB)
+    val matcher = remember(text) {
+        Regex("(https?://\\S+|www\\.\\S+|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}|\\+?\\d[\\d\\s\\-()]{7,}\\d)")
+    }
+    val annotated = remember(text) {
+        buildAnnotatedString {
+            var cursor = 0
+            matcher.findAll(text).forEach { match ->
+                if (match.range.first > cursor) {
+                    append(text.substring(cursor, match.range.first))
+                }
+                val raw = match.value
+                val normalized = when {
+                    raw.startsWith("http://", true) || raw.startsWith("https://", true) -> raw
+                    raw.startsWith("www.", true) -> "https://$raw"
+                    raw.contains("@") && !raw.contains(" ") -> "mailto:$raw"
+                    else -> "tel:${raw.filter { it.isDigit() || it == '+' }}"
+                }
+                pushStringAnnotation(tag = "url", annotation = normalized)
+                withStyle(SpanStyle(color = linkColor)) {
+                    append(raw)
+                }
+                pop()
+                cursor = match.range.last + 1
+            }
+            if (cursor < text.length) {
+                append(text.substring(cursor))
+            }
+        }
+    }
+    SelectionContainer {
+        ClickableText(
+            text = annotated,
+            style = MaterialTheme.typography.bodyMedium.copy(color = color),
+            onClick = { offset ->
+                annotated.getStringAnnotations("url", offset, offset).firstOrNull()?.let { ann ->
+                    runCatching { uriHandler.openUri(ann.item) }
+                }
+            }
         )
     }
 }

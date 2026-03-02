@@ -40,8 +40,11 @@ final class WidersAPIClient {
         )
     }
 
-    func getContactsList(session: APISession) async throws -> [String: Any] {
-        try await get(path: "/api/wpbox/getContacts", query: sessionBody(session))
+    func getContactsList(session: APISession, page: Int = 1, limit: Int = 25) async throws -> [String: Any] {
+        try await get(
+            path: "/api/wpbox/getContacts",
+            query: sessionBody(session, extra: ["page": page, "limit": limit])
+        )
     }
 
     func getTemplatesList(session: APISession) async throws -> [String: Any] {

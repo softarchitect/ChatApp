@@ -20,6 +20,13 @@ enum ConversationStatus {
     case closed
 }
 
+enum ConversationSatisfaction {
+    case satisfied
+    case neutral
+    case unsatisfied
+    case noRating
+}
+
 enum MessageType {
     case text
     case media

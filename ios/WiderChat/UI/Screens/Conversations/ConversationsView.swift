@@ -5,6 +5,18 @@ struct ConversationsView: View {
         case all, read, unread
     }
 
+    private enum AssignmentFilter: String {
+        case all, my, unassigned
+    }
+
+    private enum SatisfactionFilter: String {
+        case all, satisfied, neutral, unsatisfied, noRating
+    }
+
+    private enum SortFilter: String {
+        case latest, createdNewest, createdOldest, updatedNewest, updatedOldest
+    }
+
     private struct TagManageContext: Identifiable {
         let conversationId: String
         let tag: ConversationTag
@@ -12,6 +24,13 @@ struct ConversationsView: View {
     }
 
     @ObservedObject var vm: AppViewModel
+    @AppStorage("conv.filters.search") private var storedSearch = ""
+    @AppStorage("conv.filters.tab") private var storedTab = 0
+    @AppStorage("conv.filters.read") private var storedReadFilter = ReadFilter.all.rawValue
+    @AppStorage("conv.filters.assignment") private var storedAssignmentFilter = AssignmentFilter.all.rawValue
+    @AppStorage("conv.filters.satisfaction") private var storedSatisfactionFilter = SatisfactionFilter.all.rawValue
+    @AppStorage("conv.filters.sort") private var storedSortFilter = SortFilter.latest.rawValue
+    @AppStorage("conv.filters.tagId") private var storedTagId = 0
     @State private var search = ""
     @State private var selectedTab = 0
     @State private var selectedConversationIds: Set<String> = []
@@ -19,7 +38,6 @@ struct ConversationsView: View {
     @State private var newConversationName = ""
     @State private var newConversationPhone = ""
     @State private var contactSearch = ""
-    @State private var showRemoveConfirm = false
     @State private var quickActionsConversation: Conversation?
     @State private var tagPickerConversationId: String?
     @State private var tagPickerSearch = ""
@@ -28,14 +46,20 @@ struct ConversationsView: View {
     @State private var tagManageContext: TagManageContext?
     @State private var tagManageSelectedTagId: Int?
     @State private var readFilter: ReadFilter = .all
-    @State private var selectedAgentName: String?
+    @State private var assignmentFilter: AssignmentFilter = .all
+    @State private var satisfactionFilter: SatisfactionFilter = .all
+    @State private var sortFilter: SortFilter = .latest
     @State private var selectedTagId: Int?
     @State private var showReadFilterDialog = false
-    @State private var showAgentFilterDialog = false
+    @State private var showAssignmentFilterDialog = false
+    @State private var showSatisfactionFilterDialog = false
+    @State private var showSortFilterDialog = false
     @State private var showTagFilterDialog = false
+    @State private var visibleConversationCount = 30
+    @State private var visibleContactCount = 25
 
     var filtered: [Conversation] {
-        vm.conversations.filter { conversation in
+        let base = vm.conversations.filter { conversation in
             let tabMatches: Bool = {
                 if selectedTab == 1 { return conversation.status == .open }
                 if selectedTab == 2 { return conversation.status == .closed }
@@ -48,23 +72,43 @@ struct ConversationsView: View {
                 case .unread: return conversation.unreadCount > 0
                 }
             }()
-            let agentMatches = selectedAgentName == nil || conversation.assignedAgentName == selectedAgentName
+            let assignmentMatches: Bool = {
+                switch assignmentFilter {
+                case .all: return true
+                case .my:
+                    return conversation.assignedAgentName?.trimmingCharacters(in: .whitespacesAndNewlines)
+                        .caseInsensitiveCompare(vm.profileName.trimmingCharacters(in: .whitespacesAndNewlines)) == .orderedSame
+                case .unassigned:
+                    return (conversation.assignedAgentName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+                }
+            }()
+            let satisfactionMatches: Bool = {
+                switch satisfactionFilter {
+                case .all: return true
+                case .satisfied: return conversation.satisfaction == .satisfied
+                case .neutral: return conversation.satisfaction == .neutral
+                case .unsatisfied: return conversation.satisfaction == .unsatisfied
+                case .noRating: return conversation.satisfaction == .noRating
+                }
+            }()
             let tagMatches = selectedTagId == nil || conversation.tags.contains(where: { $0.id == selectedTagId })
             if search.trimmingCharacters(in: .whitespaces).isEmpty {
-                return tabMatches && readMatches && agentMatches && tagMatches
+                return tabMatches && readMatches && assignmentMatches && satisfactionMatches && tagMatches
             }
             let q = search.lowercased()
             return tabMatches
                 && readMatches
-                && agentMatches
+                && assignmentMatches
+                && satisfactionMatches
                 && tagMatches
                 && (conversation.customerName.lowercased().contains(q) || conversation.lastMessage.lowercased().contains(q))
         }
-    }
-
-    var agentChoices: [String] {
-        Array(Set(vm.conversations.compactMap { $0.assignedAgentName?.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty })).sorted()
+        switch sortFilter {
+        case .latest, .createdNewest, .updatedNewest:
+            return base.sorted { $0.lastMessageEpochMs > $1.lastMessageEpochMs }
+        case .createdOldest, .updatedOldest:
+            return base.sorted { $0.lastMessageEpochMs < $1.lastMessageEpochMs }
+        }
     }
 
     var filteredContacts: [NewConversationContact] {
@@ -109,17 +153,6 @@ struct ConversationsView: View {
                     .font(.system(size: 13, weight: .medium))
                     .buttonStyle(.plain)
                     .foregroundStyle(AppPalette.textSecondary)
-                    Button {
-                        showRemoveConfirm = true
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(.red)
-                            .frame(width: 34, height: 34)
-                            .background(Color.red.opacity(0.12))
-                            .clipShape(Circle())
-                    }
-                    .buttonStyle(.plain)
                 } else {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(tr(vm.locale, .conversationsTitle))
@@ -181,10 +214,54 @@ struct ConversationsView: View {
                         ) { showReadFilterDialog = true }
                         TabChip(
                             title: vm.locale == .ar
-                                ? "الوكيل: \(selectedAgentName ?? "الكل")"
-                                : "Agent: \(selectedAgentName ?? "All")",
-                            selected: selectedAgentName != nil
-                        ) { showAgentFilterDialog = true }
+                                ? (assignmentFilter == .all ? "التعيين: الكل" : (assignmentFilter == .my ? "التعيين: محادثاتي" : "التعيين: غير معين"))
+                                : (assignmentFilter == .all ? "Assignment: All" : (assignmentFilter == .my ? "Assignment: My conversations" : "Assignment: Unassigned")),
+                            selected: assignmentFilter != .all
+                        ) { showAssignmentFilterDialog = true }
+                        TabChip(
+                            title: vm.locale == .ar
+                                ? {
+                                    switch satisfactionFilter {
+                                    case .all: return "الرضا: الكل"
+                                    case .satisfied: return "الرضا: راضٍ"
+                                    case .neutral: return "الرضا: محايد"
+                                    case .unsatisfied: return "الرضا: غير راضٍ"
+                                    case .noRating: return "الرضا: بدون تقييم"
+                                    }
+                                }()
+                                : {
+                                    switch satisfactionFilter {
+                                    case .all: return "Satisfaction: All"
+                                    case .satisfied: return "Satisfaction: Satisfied"
+                                    case .neutral: return "Satisfaction: Neutral"
+                                    case .unsatisfied: return "Satisfaction: Unsatisfied"
+                                    case .noRating: return "Satisfaction: No rating"
+                                    }
+                                }(),
+                            selected: satisfactionFilter != .all
+                        ) { showSatisfactionFilterDialog = true }
+                        TabChip(
+                            title: vm.locale == .ar
+                                ? {
+                                    switch sortFilter {
+                                    case .latest: return "الترتيب: الأحدث"
+                                    case .createdNewest: return "الترتيب: إنشاء (الأحدث)"
+                                    case .createdOldest: return "الترتيب: إنشاء (الأقدم)"
+                                    case .updatedNewest: return "الترتيب: تحديث (الأحدث)"
+                                    case .updatedOldest: return "الترتيب: تحديث (الأقدم)"
+                                    }
+                                }()
+                                : {
+                                    switch sortFilter {
+                                    case .latest: return "Sort: Latest"
+                                    case .createdNewest: return "Sort: Created (Newest)"
+                                    case .createdOldest: return "Sort: Created (Oldest)"
+                                    case .updatedNewest: return "Sort: Updated (Newest)"
+                                    case .updatedOldest: return "Sort: Updated (Oldest)"
+                                    }
+                                }(),
+                            selected: sortFilter != .latest
+                        ) { showSortFilterDialog = true }
                         TabChip(
                             title: vm.locale == .ar
                                 ? "الوسم: \(selectedTagId.map { "\($0)" } ?? "الكل")"
@@ -195,6 +272,12 @@ struct ConversationsView: View {
                     .padding(.horizontal, 16)
                 }
                 .padding(.bottom, 8)
+                Text(vm.locale == .ar ? "عدد النتائج: \(filtered.count)" : "Result count: \(filtered.count)")
+                    .font(.system(size: 12))
+                    .foregroundStyle(AppPalette.textMuted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
                 if let status = vm.actionStatus, !status.isEmpty {
                     Text(status)
                         .font(.system(size: 12, weight: .medium))
@@ -223,7 +306,7 @@ struct ConversationsView: View {
                 Spacer()
             } else {
                 List {
-                    ForEach(filtered) { convo in
+                    ForEach(Array(filtered.prefix(visibleConversationCount))) { convo in
                         let baseRow = ConversationRow(
                             conversation: convo,
                             locale: vm.locale,
@@ -308,20 +391,33 @@ struct ConversationsView: View {
                                 .listRowBackground(AppPalette.surface)
                         }
                     }
+                    if visibleConversationCount < filtered.count {
+                        HStack {
+                            Spacer()
+                            ProgressView()
+                            Spacer()
+                        }
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(AppPalette.surface)
+                        .onAppear {
+                            visibleConversationCount = min(visibleConversationCount + 30, filtered.count)
+                        }
+                    }
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
                 .background(AppPalette.surface)
+                .refreshable {
+                    await vm.refreshConversationsList()
+                }
             }
         }
-        .alert(vm.locale == .ar ? "إزالة المحادثات المحددة؟" : "Remove selected conversations?", isPresented: $showRemoveConfirm) {
-            Button(vm.locale == .ar ? "إلغاء" : "Cancel", role: .cancel) {}
-            Button(vm.locale == .ar ? "إزالة" : "Remove", role: .destructive) {
-                vm.deleteConversations(ids: Array(selectedConversationIds))
-                selectedConversationIds = []
+        .onChange(of: filtered.count) { _, newValue in
+            if newValue < visibleConversationCount {
+                visibleConversationCount = max(30, newValue)
+            } else if visibleConversationCount == 0 {
+                visibleConversationCount = 30
             }
-        } message: {
-            Text(vm.locale == .ar ? "سيتم حذف المحادثات المحددة من القائمة." : "Selected conversations will be removed from the list.")
         }
         .sheet(item: $quickActionsConversation) { convo in
             VStack(alignment: .leading, spacing: 12) {
@@ -462,13 +558,34 @@ struct ConversationsView: View {
             Button(vm.locale == .ar ? "إلغاء" : "Cancel", role: .cancel) {}
         }
         .confirmationDialog(
-            vm.locale == .ar ? "فلتر الوكيل" : "Agent filter",
-            isPresented: $showAgentFilterDialog
+            vm.locale == .ar ? "فلتر التعيين" : "Assignment filter",
+            isPresented: $showAssignmentFilterDialog
         ) {
-            Button(vm.locale == .ar ? "الكل" : "All") { selectedAgentName = nil }
-            ForEach(agentChoices, id: \.self) { name in
-                Button(name) { selectedAgentName = name }
-            }
+            Button(vm.locale == .ar ? "الكل" : "All") { assignmentFilter = .all }
+            Button(vm.locale == .ar ? "محادثاتي" : "My conversations") { assignmentFilter = .my }
+            Button(vm.locale == .ar ? "غير معين" : "Unassigned") { assignmentFilter = .unassigned }
+            Button(vm.locale == .ar ? "إلغاء" : "Cancel", role: .cancel) {}
+        }
+        .confirmationDialog(
+            vm.locale == .ar ? "فلتر الرضا" : "Satisfaction filter",
+            isPresented: $showSatisfactionFilterDialog
+        ) {
+            Button(vm.locale == .ar ? "الكل" : "All") { satisfactionFilter = .all }
+            Button(vm.locale == .ar ? "راضٍ" : "Satisfied") { satisfactionFilter = .satisfied }
+            Button(vm.locale == .ar ? "محايد" : "Neutral") { satisfactionFilter = .neutral }
+            Button(vm.locale == .ar ? "غير راضٍ" : "Unsatisfied") { satisfactionFilter = .unsatisfied }
+            Button(vm.locale == .ar ? "بدون تقييم" : "No rating") { satisfactionFilter = .noRating }
+            Button(vm.locale == .ar ? "إلغاء" : "Cancel", role: .cancel) {}
+        }
+        .confirmationDialog(
+            vm.locale == .ar ? "الترتيب" : "Sorting",
+            isPresented: $showSortFilterDialog
+        ) {
+            Button(vm.locale == .ar ? "الأحدث" : "Latest") { sortFilter = .latest }
+            Button(vm.locale == .ar ? "إنشاء (الأحدث)" : "Created (Newest)") { sortFilter = .createdNewest }
+            Button(vm.locale == .ar ? "إنشاء (الأقدم)" : "Created (Oldest)") { sortFilter = .createdOldest }
+            Button(vm.locale == .ar ? "تحديث (الأحدث)" : "Updated (Newest)") { sortFilter = .updatedNewest }
+            Button(vm.locale == .ar ? "تحديث (الأقدم)" : "Updated (Oldest)") { sortFilter = .updatedOldest }
             Button(vm.locale == .ar ? "إلغاء" : "Cancel", role: .cancel) {}
         }
         .confirmationDialog(
@@ -735,6 +852,7 @@ struct ConversationsView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                     .padding(.horizontal, 16)
                     .onChange(of: contactSearch) { _, value in
+                        visibleContactCount = 25
                         vm.searchContactsForNewConversation(value)
                     }
 
@@ -744,7 +862,7 @@ struct ConversationsView: View {
                 } else {
                     ScrollView {
                         LazyVStack(spacing: 0) {
-                            ForEach(filteredContacts) { contact in
+                            ForEach(Array(filteredContacts.prefix(visibleContactCount))) { contact in
                                 Button {
                                     vm.startConversationForContact(contact)
                                     showNewConversationDialog = false
@@ -768,6 +886,17 @@ struct ConversationsView: View {
                                 .buttonStyle(.plain)
                                 Divider().overlay(AppPalette.border.opacity(0.5))
                             }
+                            if visibleContactCount < filteredContacts.count {
+                                HStack {
+                                    Spacer()
+                                    ProgressView()
+                                    Spacer()
+                                }
+                                .padding(.vertical, 10)
+                                .onAppear {
+                                    visibleContactCount = min(visibleContactCount + 25, filteredContacts.count)
+                                }
+                            }
                         }
                     }
                     .frame(maxHeight: 360)
@@ -776,6 +905,27 @@ struct ConversationsView: View {
             }
             .presentationDetents([.large])
         }
+        .onChange(of: showNewConversationDialog) { _, open in
+            if open {
+                visibleContactCount = 25
+            }
+        }
+        .onAppear {
+            search = storedSearch
+            selectedTab = storedTab
+            readFilter = ReadFilter(rawValue: storedReadFilter) ?? .all
+            assignmentFilter = AssignmentFilter(rawValue: storedAssignmentFilter) ?? .all
+            satisfactionFilter = SatisfactionFilter(rawValue: storedSatisfactionFilter) ?? .all
+            sortFilter = SortFilter(rawValue: storedSortFilter) ?? .latest
+            selectedTagId = storedTagId > 0 ? storedTagId : nil
+        }
+        .onChange(of: search) { _, value in storedSearch = value }
+        .onChange(of: selectedTab) { _, value in storedTab = value }
+        .onChange(of: readFilter) { _, value in storedReadFilter = value.rawValue }
+        .onChange(of: assignmentFilter) { _, value in storedAssignmentFilter = value.rawValue }
+        .onChange(of: satisfactionFilter) { _, value in storedSatisfactionFilter = value.rawValue }
+        .onChange(of: sortFilter) { _, value in storedSortFilter = value.rawValue }
+        .onChange(of: selectedTagId) { _, value in storedTagId = value ?? 0 }
     }
 
     private func quickActionRowLabel(title: String, subtitle: String, icon: String, color: Color) -> some View {

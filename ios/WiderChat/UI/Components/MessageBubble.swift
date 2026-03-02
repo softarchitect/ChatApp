@@ -30,9 +30,15 @@ struct MessageBubble: View {
                             darkMode: darkMode
                         )
                     } else {
-                        Text(message.content)
+                        Text(attributedMessageContent(message.content))
                             .font(.system(size: 14))
                             .foregroundStyle(isAgent ? (darkMode ? Color(red: 0.95, green: 0.97, blue: 0.99) : Color(red: 0.06, green: 0.09, blue: 0.16)) : AppPalette.textPrimary)
+                            .textSelection(.enabled)
+                            .contextMenu {
+                                Button("Copy") {
+                                    UIPasteboard.general.string = message.content
+                                }
+                            }
                     }
                     HStack(spacing: 4) {
                         Text(message.timestamp)
@@ -69,5 +75,28 @@ struct MessageBubble: View {
         case .read: return "checkmark.circle.fill"
         case .failed: return "exclamationmark.circle"
         }
+    }
+
+    private func attributedMessageContent(_ value: String) -> AttributedString {
+        var attributed = AttributedString(value)
+        let range = NSRange(location: 0, length: value.utf16.count)
+        let detectorTypes: NSTextCheckingResult.CheckingType = [.link, .phoneNumber]
+        guard let detector = try? NSDataDetector(types: detectorTypes.rawValue) else { return attributed }
+
+        for match in detector.matches(in: value, options: [], range: range).reversed() {
+            guard Range(match.range, in: value) != nil,
+                  let linkRange = Range(match.range, in: attributed)
+            else { continue }
+            if let url = match.url {
+                attributed[linkRange].link = url
+            } else if let number = match.phoneNumber,
+                      let telURL = URL(string: "tel:\(number.replacingOccurrences(of: \" \", with: \"\"))") {
+                attributed[linkRange].link = telURL
+            }
+            attributed[linkRange].foregroundColor = .blue
+            attributed[linkRange].underlineStyle = .single
+        }
+
+        return attributed
     }
 }

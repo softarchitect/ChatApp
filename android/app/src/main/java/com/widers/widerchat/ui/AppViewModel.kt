@@ -20,9 +20,12 @@ import com.widers.widerchat.domain.model.MessageSender
 import com.widers.widerchat.domain.model.MessageType
 import com.widers.widerchat.domain.repository.ChatRepository
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.text.SimpleDateFormat
@@ -66,6 +69,7 @@ class AppViewModel(
     private val _uiState = MutableStateFlow(AppUiState())
     val uiState: StateFlow<AppUiState> = _uiState.asStateFlow()
     private val localOutgoingByConversation = mutableMapOf<String, MutableList<ChatMessage>>()
+    private var activeChatPollingJob: Job? = null
 
     fun login(email: String, password: String) {
         if (email.isBlank() || password.isBlank()) {
@@ -142,6 +146,7 @@ class AppViewModel(
     }
 
     fun logout() {
+        stopActiveChatPolling()
         _uiState.value = _uiState.value.copy(
             isLoggedIn = false,
             screen = AppScreen.LOGIN,
@@ -172,6 +177,7 @@ class AppViewModel(
     }
 
     fun openChat(conversationId: String) {
+        stopActiveChatPolling()
         val preselectedConversation = _uiState.value.conversations.firstOrNull { it.id == conversationId }
         _uiState.value = _uiState.value.copy(
             activeChatId = conversationId,
@@ -214,6 +220,7 @@ class AppViewModel(
                         }
                     )
                 }
+                startActiveChatPolling(conversationId)
             } finally {
                 if (_uiState.value.activeChatId == conversationId) {
                     _uiState.value = _uiState.value.copy(isChatLoading = false)
@@ -223,6 +230,7 @@ class AppViewModel(
     }
 
     fun backToConversations() {
+        stopActiveChatPolling()
         _uiState.value = _uiState.value.copy(screen = AppScreen.CONVERSATIONS, isChatLoading = false)
         refreshConversations()
     }
@@ -851,6 +859,10 @@ class AppViewModel(
         }
     }
 
+    fun refreshConversationsList() {
+        refreshConversations()
+    }
+
     fun refreshAvailableTags() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -1114,6 +1126,31 @@ class AppViewModel(
 
     private fun setActionStatus(message: String) {
         _uiState.value = _uiState.value.copy(actionStatus = message)
+    }
+
+    private fun startActiveChatPolling(conversationId: String) {
+        activeChatPollingJob?.cancel()
+        activeChatPollingJob = viewModelScope.launch(Dispatchers.IO) {
+            while (isActive) {
+                delay(4000)
+                if (_uiState.value.activeChatId != conversationId || _uiState.value.screen != AppScreen.CHAT) {
+                    break
+                }
+                val latest = mergeWithLocalOutgoing(conversationId, repository.getMessages(conversationId))
+                val conversations = repository.getConversations()
+                if (_uiState.value.activeChatId == conversationId) {
+                    _uiState.value = _uiState.value.copy(
+                        activeMessages = latest,
+                        conversations = conversations
+                    )
+                }
+            }
+        }
+    }
+
+    private fun stopActiveChatPolling() {
+        activeChatPollingJob?.cancel()
+        activeChatPollingJob = null
     }
 
     private suspend fun runAction(block: suspend () -> Unit) {

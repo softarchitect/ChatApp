@@ -8,7 +8,6 @@ typealias ChatScreenView = ChatView
 
 struct ChatView: View {
     @ObservedObject var vm: AppViewModel
-    @Environment(\.openURL) private var openURL
     @State private var messageInput = ""
     @State private var showingInternalNoteComposer = false
     @State private var noteInput = ""
@@ -19,7 +18,6 @@ struct ChatView: View {
     @State private var showReplyDialog = false
     @State private var showCustomFieldDialog = false
     @State private var showUpdateContactDialog = false
-    @State private var showDeleteConfirm = false
     @State private var agentSearch = ""
     @State private var tagSearch = ""
     @State private var templateSearch = ""
@@ -43,11 +41,6 @@ struct ChatView: View {
     @State private var audioRecorder: AVAudioRecorder?
     @State private var isRecordingVoice = false
     @State private var showContactInfoSheet = false
-    @State private var showCallUnavailableAlert = false
-    @State private var showEmojiPicker = false
-    @State private var selectedEmojiCategory = "recent"
-    @State private var emojiSearchQuery = ""
-    @State private var recentEmojis = ["😀", "❤️", "👍"]
     @State private var skeletonOpacity = 0.55
     @State private var skeletonShimmerOffset: CGFloat = -240
     private let emojiCategories: [String: [String]] = [
@@ -81,9 +74,16 @@ struct ChatView: View {
                                     .foregroundStyle(AppPalette.primary)
                             )
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(currentConversation?.customerName ?? "-")
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(AppPalette.textPrimary)
+                            HStack(spacing: 6) {
+                                Text(currentConversation?.customerName ?? "-")
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(AppPalette.textPrimary)
+                                    .lineLimit(1)
+                                    .layoutPriority(1)
+                                if let satisfaction = currentConversation?.satisfaction {
+                                    SatisfactionBadge(value: satisfaction, locale: vm.locale, variant: .regular)
+                                }
+                            }
                             HStack(spacing: 6) {
                                 Circle().fill((currentConversation?.isOnline ?? false) ? AppPalette.primary : AppPalette.textMuted).frame(width: 7, height: 7)
                                 Text((currentConversation?.isOnline ?? false) ? tr(vm.locale, .online) : "\(tr(vm.locale, .lastSeen)) \(tr(vm.locale, .today))")
@@ -95,14 +95,6 @@ struct ChatView: View {
                 }
                 .buttonStyle(.plain)
                 Spacer()
-                Button {
-                    startCallToCurrentContact()
-                } label: {
-                    Image(systemName: "phone")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(AppPalette.textPrimary)
-                }
-                .buttonStyle(.plain)
                 Menu {
                     Button(tr(vm.locale, .internalNote)) { showingInternalNoteComposer.toggle() }
                     Button((currentConversation?.status ?? .open) == .open ? tr(vm.locale, .closeConversation) : tr(vm.locale, .reopenConversation)) {
@@ -151,7 +143,6 @@ struct ChatView: View {
                         updateContactEmail = ""
                         showUpdateContactDialog = true
                     }
-                    Button(tr(vm.locale, .deleteChat), role: .destructive) { showDeleteConfirm = true }
                 } label: {
                     Image(systemName: "ellipsis.circle")
                         .font(.system(size: 20))
@@ -163,13 +154,15 @@ struct ChatView: View {
             .background(AppPalette.surface)
             Divider().overlay(AppPalette.border)
             if let status = vm.actionStatus, !status.isEmpty {
+                let isMetaWindowWarning = status.localizedCaseInsensitiveContains("24")
+                    && status.localizedCaseInsensitiveContains("template")
                 Text(status)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(AppPalette.primary)
+                    .foregroundStyle(isMetaWindowWarning ? Color.white : AppPalette.primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 6)
-                    .background(AppPalette.secondarySoft)
+                    .background(isMetaWindowWarning ? Color.red : AppPalette.secondarySoft)
             }
 
             ZStack {
@@ -361,48 +354,89 @@ struct ChatView: View {
                 .padding(.bottom, 8)
             }
 
-            if showEmojiPicker {
-                VStack(spacing: 6) {
-                    TextField(vm.locale == .ar ? "ابحث عن ايموجي" : "Search emoji", text: $emojiSearchQuery)
-                        .textFieldStyle(.roundedBorder)
-                        .padding(.horizontal, 12)
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 6) {
-                            ForEach(["recent", "smileys", "gestures", "hearts", "celebration"], id: \.self) { category in
-                                Button {
-                                    selectedEmojiCategory = category
-                                } label: {
-                                    Text(localizedEmojiCategoryLabel(category))
-                                        .font(.system(size: 12, weight: .medium))
-                                        .padding(.horizontal, 10)
-                                        .frame(height: 34)
-                                        .background(category == selectedEmojiCategory ? AppPalette.primary.opacity(0.16) : .clear)
-                                        .clipShape(Capsule())
+            let commandInput = messageInput.trimmingCharacters(in: .whitespacesAndNewlines)
+            let commandQuery = String(commandInput.dropFirst()).lowercased()
+            let replyCommandItems = commandInput.hasPrefix("/")
+                ? vm.availableReplies.filter {
+                    commandQuery.isEmpty
+                        || $0.name.lowercased().contains(commandQuery)
+                        || $0.text.lowercased().contains(commandQuery)
+                }.prefix(8)
+                : vm.availableReplies.prefix(0)
+            let agentCommandItems = commandInput.hasPrefix("@")
+                ? vm.availableAgents.filter {
+                    commandQuery.isEmpty || $0.name.lowercased().contains(commandQuery)
+                }.prefix(8)
+                : vm.availableAgents.prefix(0)
+            let tagCommandItems = commandInput.hasPrefix("#")
+                ? vm.availableTags.filter {
+                    commandQuery.isEmpty || $0.name.lowercased().contains(commandQuery)
+                }.prefix(8)
+                : vm.availableTags.prefix(0)
+
+            if commandInput.hasPrefix("/") || commandInput.hasPrefix("@") || commandInput.hasPrefix("#") {
+                VStack(spacing: 0) {
+                    if commandInput.hasPrefix("/") {
+                        ForEach(Array(replyCommandItems), id: \.id) { reply in
+                            Button {
+                                vm.sendQuickReplyToCurrentChat(replyId: reply.id)
+                                messageInput = ""
+                                forceAutoScroll = true
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(reply.name)
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(AppPalette.textPrimary)
+                                    Text(reply.text)
+                                        .font(.system(size: 12))
+                                        .lineLimit(1)
+                                        .foregroundStyle(AppPalette.textMuted)
                                 }
-                                .buttonStyle(.plain)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
                             }
+                            .buttonStyle(.plain)
+                            Divider().overlay(AppPalette.border.opacity(0.4))
                         }
-                        .padding(.horizontal, 12)
-                    }
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 6) {
-                            ForEach(filteredEmojisForSelectedCategory, id: \.self) { emoji in
-                                Button {
-                                    addEmojiToInput(emoji)
-                                } label: {
-                                    Text(emoji)
-                                        .font(.system(size: 24))
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 4)
-                                }
-                                .buttonStyle(.plain)
+                    } else if commandInput.hasPrefix("@") {
+                        ForEach(Array(agentCommandItems), id: \.id) { agent in
+                            Button {
+                                vm.assignCurrentChat(agentId: agent.id)
+                                messageInput = ""
+                            } label: {
+                                Text(agent.name)
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(AppPalette.textPrimary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
                             }
+                            .buttonStyle(.plain)
+                            Divider().overlay(AppPalette.border.opacity(0.4))
                         }
-                        .padding(.horizontal, 12)
+                    } else if commandInput.hasPrefix("#") {
+                        ForEach(Array(tagCommandItems), id: \.id) { tag in
+                            Button {
+                                vm.attachTagToCurrentChat(tagId: tag.id)
+                                messageInput = ""
+                            } label: {
+                                Text(tag.name)
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(AppPalette.textPrimary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                            }
+                            .buttonStyle(.plain)
+                            Divider().overlay(AppPalette.border.opacity(0.4))
+                        }
                     }
                 }
-                .padding(.vertical, 6)
                 .background(AppPalette.surface)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .padding(.horizontal, 12)
+                .padding(.bottom, 4)
             }
 
             HStack(spacing: 10) {
@@ -416,13 +450,6 @@ struct ChatView: View {
                     Button(tr(vm.locale, .document)) {
                         showDocumentImporter = true
                     }
-                    Button(isRecordingVoice ? tr(vm.locale, .stopSendVoice) : tr(vm.locale, .audio)) {
-                        if isRecordingVoice {
-                            stopRecordingAndSend()
-                        } else {
-                            startVoiceRecording()
-                        }
-                    }
                 } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 16, weight: .semibold))
@@ -431,16 +458,27 @@ struct ChatView: View {
                         .background(AppPalette.card)
                         .clipShape(Circle())
                 }
-                Button {
-                    showEmojiPicker.toggle()
-                } label: {
-                    Text("😀")
-                        .font(.system(size: 18))
-                        .frame(width: 36, height: 36)
-                        .background(AppPalette.card)
-                        .clipShape(Circle())
-                }
-                .buttonStyle(.plain)
+                Circle()
+                    .fill(isRecordingVoice ? .red : AppPalette.card)
+                    .frame(width: 36, height: 36)
+                    .overlay(
+                        Image(systemName: "mic.fill")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(isRecordingVoice ? Color.white : AppPalette.textSecondary)
+                    )
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { _ in
+                                if !isRecordingVoice {
+                                    startVoiceRecording()
+                                }
+                            }
+                            .onEnded { _ in
+                                if isRecordingVoice {
+                                    stopRecordingAndSend()
+                                }
+                            }
+                    )
 
                 TextField(tr(vm.locale, .typeMessage), text: $messageInput, axis: .vertical)
                     .lineLimit(1...4)
@@ -453,7 +491,6 @@ struct ChatView: View {
                     forceAutoScroll = true
                     vm.sendMessage(messageInput)
                     messageInput = ""
-                    showEmojiPicker = false
                 } label: {
                     Image(systemName: "paperplane.fill")
                         .font(.system(size: 16))
@@ -478,8 +515,7 @@ struct ChatView: View {
                 messages: vm.activeMessages,
                 onMute: { vm.muteCurrentChat(true) },
                 onUnmute: { vm.muteCurrentChat(false) },
-                onToggleStatus: { vm.toggleConversationStatus() },
-                onDeleteChat: { vm.deleteCurrentChat() }
+                onToggleStatus: { vm.toggleConversationStatus() }
             )
         }
         .fileImporter(
@@ -961,19 +997,6 @@ struct ChatView: View {
             }
             .presentationDetents([.medium, .large])
         }
-        .alert(tr(vm.locale, .deleteChatQuestion), isPresented: $showDeleteConfirm) {
-            Button(tr(vm.locale, .cancel), role: .cancel) {}
-            Button(tr(vm.locale, .delete), role: .destructive) {
-                vm.deleteCurrentChat()
-            }
-        } message: {
-            Text(tr(vm.locale, .deleteChatEndpointHint))
-        }
-        .alert(tr(vm.locale, .callUnavailable), isPresented: $showCallUnavailableAlert) {
-            Button(tr(vm.locale, .ok), role: .cancel) {}
-        } message: {
-            Text(tr(vm.locale, .callUnavailableMessage))
-        }
     }
 
     private func handleFileImport(_ result: Result<[URL], Error>, kindLabel: String) {
@@ -1057,101 +1080,6 @@ struct ChatView: View {
         }
     }
 
-    private func startCallToCurrentContact() {
-        let raw = currentConversation?.customerPhone ?? ""
-        let phone = raw
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: " ", with: "")
-            .replacingOccurrences(of: "-", with: "")
-        guard !phone.isEmpty else {
-            showCallUnavailableAlert = true
-            return
-        }
-        guard let url = URL(string: "tel://\(phone)") else {
-            showCallUnavailableAlert = true
-            return
-        }
-        openURL(url) { accepted in
-            if !accepted {
-                showCallUnavailableAlert = true
-            }
-        }
-    }
-
-    private var emojisForSelectedCategory: [String] {
-        if selectedEmojiCategory == "recent" {
-            return recentEmojis
-        }
-        return emojiCategories[selectedEmojiCategory] ?? []
-    }
-
-    private var filteredEmojisForSelectedCategory: [String] {
-        let query = emojiSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !query.isEmpty else { return emojisForSelectedCategory }
-        let combined = recentEmojis + emojiCategories.values.flatMap { $0 }
-        var seen = Set<String>()
-        let all = combined.filter { seen.insert($0).inserted }
-        return all.filter { emojiMatchesSearch($0, query: query) || $0.contains(query) }
-    }
-
-    private func localizedEmojiCategoryLabel(_ key: String) -> String {
-        let ar = vm.locale == .ar
-        switch key {
-        case "recent": return ar ? "الأخيرة" : "Recent"
-        case "smileys": return ar ? "وجوه" : "Smileys"
-        case "gestures": return ar ? "إشارات" : "Gestures"
-        case "hearts": return ar ? "قلوب" : "Hearts"
-        case "celebration": return ar ? "احتفال" : "Celebration"
-        default: return key
-        }
-    }
-
-    private func emojiMatchesSearch(_ emoji: String, query: String) -> Bool {
-        let category: String
-        switch emoji {
-        case "😀", "😃", "😄", "😁", "😆", "😅", "😂", "🤣", "🙂", "😉", "😍", "🥰", "😘", "😎", "🤔", "😭":
-            category = "smileys"
-        case "👍", "👎", "👏", "🙌", "🙏", "🤝", "💪", "👌", "✌️", "🤞", "👋", "🤲", "🫶", "💯", "✅", "❌":
-            category = "gestures"
-        case "❤️", "🩷", "🧡", "💛", "💚", "💙", "💜", "🖤", "🤍", "🤎", "💔", "❣️", "💕", "💖", "💗", "🔥":
-            category = "hearts"
-        case "🎉", "🎊", "✨", "⭐", "🌟", "⚡", "☀️", "🌈", "🍀", "🎁", "🏆", "🎵", "🎶", "📌", "📣", "📷":
-            category = "celebration"
-        default:
-            category = "recent"
-        }
-
-        let enKeywords: [String]
-        let arKeywords: [String]
-        switch category {
-        case "smileys":
-            enKeywords = ["smile", "face", "happy", "sad", "cry", "laugh"]
-            arKeywords = ["وجه", "ابتسامة", "ضحك", "بكاء", "حزين", "سعيد"]
-        case "gestures":
-            enKeywords = ["hand", "ok", "thumb", "clap", "pray", "check"]
-            arKeywords = ["يد", "اشارة", "تصفيق", "دعاء", "موافق"]
-        case "hearts":
-            enKeywords = ["heart", "love", "fire", "broken"]
-            arKeywords = ["قلب", "حب", "نار", "مكسور"]
-        case "celebration":
-            enKeywords = ["party", "star", "music", "gift", "celebrate"]
-            arKeywords = ["حفلة", "احتفال", "نجمة", "موسيقى", "هدية"]
-        default:
-            enKeywords = ["recent"]
-            arKeywords = ["اخير", "الأخيرة"]
-        }
-        let keywords = vm.locale == .ar ? (arKeywords + enKeywords) : (enKeywords + arKeywords)
-        return keywords.contains { $0.contains(query) || query.contains($0) }
-    }
-
-    private func addEmojiToInput(_ emoji: String) {
-        messageInput += emoji
-        recentEmojis.removeAll { $0 == emoji }
-        recentEmojis.insert(emoji, at: 0)
-        if recentEmojis.count > 24 {
-            recentEmojis = Array(recentEmojis.prefix(24))
-        }
-    }
 }
 
 private struct ContactInfoSheet: View {
@@ -1161,7 +1089,6 @@ private struct ContactInfoSheet: View {
     let onMute: () -> Void
     let onUnmute: () -> Void
     let onToggleStatus: () -> Void
-    let onDeleteChat: () -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var showMediaLinksDocsSheet = false
 
@@ -1273,10 +1200,6 @@ private struct ContactInfoSheet: View {
                             fill: true
                         ) {
                             onToggleStatus()
-                        }
-                        actionButton(tr(vm.locale, .delete), tint: .red, fill: false) {
-                            onDeleteChat()
-                            dismiss()
                         }
                     }
                 }
