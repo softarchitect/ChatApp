@@ -202,8 +202,8 @@ struct ConversationsView: View {
     }
 
     private var configuredBody: AnyView {
-        AnyView(
-            conversationsRoot
+        conversationsRoot
+            .erased()
             .onChange(of: filtered.count) { _, newValue in
                 if newValue < visibleConversationCount {
                     visibleConversationCount = max(30, newValue)
@@ -211,6 +211,7 @@ struct ConversationsView: View {
                     visibleConversationCount = 30
                 }
             }
+            .erased()
             .sheet(item: $quickActionsConversation) { convo in
                 VStack(alignment: .leading, spacing: 12) {
                     Text(convo.customerName)
@@ -340,6 +341,7 @@ struct ConversationsView: View {
                 .padding(16)
                 .presentationDetents([.height(400), .medium])
             }
+            .erased()
             .confirmationDialog(
                 vm.locale == .ar ? "فلتر القراءة" : "Read filter",
                 isPresented: $showReadFilterDialog
@@ -349,6 +351,7 @@ struct ConversationsView: View {
                 Button(vm.locale == .ar ? "غير مقروء" : "Unread") { readFilter = .unread }
                 Button(vm.locale == .ar ? "إلغاء" : "Cancel", role: .cancel) {}
             }
+            .erased()
             .confirmationDialog(
                 vm.locale == .ar ? "فلتر التعيين" : "Assignment filter",
                 isPresented: $showAssignmentFilterDialog
@@ -358,6 +361,7 @@ struct ConversationsView: View {
                 Button(vm.locale == .ar ? "غير معين" : "Unassigned") { assignmentFilter = .unassigned }
                 Button(vm.locale == .ar ? "إلغاء" : "Cancel", role: .cancel) {}
             }
+            .erased()
             .confirmationDialog(
                 vm.locale == .ar ? "فلتر الرضا" : "Satisfaction filter",
                 isPresented: $showSatisfactionFilterDialog
@@ -369,6 +373,7 @@ struct ConversationsView: View {
                 Button(vm.locale == .ar ? "بدون تقييم" : "No rating") { satisfactionFilter = .noRating }
                 Button(vm.locale == .ar ? "إلغاء" : "Cancel", role: .cancel) {}
             }
+            .erased()
             .confirmationDialog(
                 vm.locale == .ar ? "الترتيب" : "Sorting",
                 isPresented: $showSortFilterDialog
@@ -380,6 +385,7 @@ struct ConversationsView: View {
                 Button(vm.locale == .ar ? "تحديث (الأقدم)" : "Updated (Oldest)") { sortFilter = .updatedOldest }
                 Button(vm.locale == .ar ? "إلغاء" : "Cancel", role: .cancel) {}
             }
+            .erased()
             .confirmationDialog(
                 vm.locale == .ar ? "فلتر الوسم" : "Tag filter",
                 isPresented: $showTagFilterDialog
@@ -390,6 +396,7 @@ struct ConversationsView: View {
                 }
                 Button(vm.locale == .ar ? "إلغاء" : "Cancel", role: .cancel) {}
             }
+            .erased()
             .sheet(
                 isPresented: Binding(
                     get: { tagPickerConversationId != nil },
@@ -476,6 +483,7 @@ struct ConversationsView: View {
                 }
                 .presentationDetents([.medium, .large])
             }
+            .erased()
             .sheet(item: $tagManageContext) { context in
                 let conversationTags = vm.conversations.first(where: { $0.id == context.conversationId })?.tags ?? [context.tag]
                 let activeTag = conversationTags.first(where: { $0.id == tagManageSelectedTagId }) ?? context.tag
@@ -593,6 +601,7 @@ struct ConversationsView: View {
                 .padding(16)
                 .presentationDetents([.height(330), .medium])
             }
+            .erased()
             .sheet(isPresented: $showNewConversationDialog) {
                 VStack(spacing: 12) {
                     HStack {
@@ -718,7 +727,7 @@ struct ConversationsView: View {
             .onChange(of: satisfactionFilter) { _, value in storedSatisfactionFilter = value.rawValue }
             .onChange(of: sortFilter) { _, value in storedSortFilter = value.rawValue }
             .onChange(of: selectedTagId) { _, value in storedTagId = value ?? 0 }
-        )
+            .erased()
     }
 
     private var conversationsRoot: some View {
@@ -1033,5 +1042,11 @@ struct ConversationsView: View {
             }
         }
         return value
+    }
+}
+
+private extension View {
+    func erased() -> AnyView {
+        AnyView(self)
     }
 }
