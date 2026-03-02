@@ -215,11 +215,13 @@ private struct VideoMessageThumbnail: View {
                 let generator = AVAssetImageGenerator(asset: asset)
                 generator.appliesPreferredTrackTransform = true
                 let time = CMTime(seconds: 0.2, preferredTimescale: 600)
-                do {
-                    let cg = try generator.copyCGImage(at: time, actualTime: nil)
-                    continuation.resume(returning: UIImage(cgImage: cg))
-                } catch {
-                    continuation.resume(returning: nil)
+                let points = [NSValue(time: time)]
+                generator.generateCGImagesAsynchronously(forTimes: points) { _, image, _, _, _ in
+                    if let image {
+                        continuation.resume(returning: UIImage(cgImage: image))
+                    } else {
+                        continuation.resume(returning: nil)
+                    }
                 }
             }
         }
@@ -287,7 +289,7 @@ struct VideoPlayerSheet: View {
 
                         Button(">>") {
                             guard let player else { return }
-                            let maxDuration = max(durationSeconds, player.currentItem?.duration.seconds ?? 0)
+                            let maxDuration = durationSeconds > 0 ? durationSeconds : (currentSeconds + 10)
                             let next = min(maxDuration, player.currentTime().seconds + 10)
                             player.seek(to: CMTime(seconds: next, preferredTimescale: 600))
                         }
@@ -331,7 +333,7 @@ struct VideoPlayerSheet: View {
             guard player == nil else { return }
             let p = AVPlayer(url: videoURL)
             player = p
-            durationSeconds = p.currentItem?.asset.duration.seconds.isFinite == true ? (p.currentItem?.asset.duration.seconds ?? 0) : 0
+            Task { await loadVideoDuration(for: p) }
             p.play()
             isPlaying = true
 
@@ -342,8 +344,6 @@ struct VideoPlayerSheet: View {
                 if !isScrubbing {
                     currentSeconds = max(0, time.seconds)
                 }
-                let d = p.currentItem?.duration.seconds ?? durationSeconds
-                if d.isFinite, d > 0 { durationSeconds = d }
                 if durationSeconds > 0, currentSeconds >= durationSeconds {
                     isPlaying = false
                 }
@@ -356,6 +356,22 @@ struct VideoPlayerSheet: View {
                 player.removeTimeObserver(token)
             }
             timeObserverToken = nil
+        }
+    }
+}
+
+extension VideoPlayerSheet {
+    private func loadVideoDuration(for player: AVPlayer) async {
+        guard let item = player.currentItem else { return }
+        do {
+            let loaded = try await item.asset.load(.duration)
+            let secs = loaded.seconds
+            if secs.isFinite, secs > 0 {
+                await MainActor.run {
+                    durationSeconds = secs
+                }
+            }
+        } catch {
         }
     }
 }
@@ -434,30 +450,7 @@ struct InlineAudioMessageView: View {
             if player == nil {
                 let item = AVPlayerItem(url: audioURL)
                 player = AVPlayer(playerItem: item)
-                durationSeconds = item.asset.duration.seconds.isFinite ? item.asset.duration.seconds : 0
-                if durationSeconds <= 0 {
-                    Task {
-                        let asset = AVURLAsset(url: audioURL)
-                        do {
-                            let loaded = try await asset.load(.duration)
-                            let secs = loaded.seconds
-                            if secs.isFinite, secs > 0 {
-                                durationSeconds = secs
-                                return
-                            }
-                        } catch {
-                        }
-                        do {
-                            let (data, _) = try await URLSession.shared.data(from: audioURL)
-                            let audioPlayer = try AVAudioPlayer(data: data)
-                            let secs = audioPlayer.duration
-                            if secs.isFinite, secs > 0 {
-                                durationSeconds = secs
-                            }
-                        } catch {
-                        }
-                    }
-                }
+                Task { await loadAudioDuration() }
             }
         }
         .onDisappear {
@@ -483,13 +476,12 @@ struct InlineAudioMessageView: View {
         } else {
             player.play()
             isPlaying = true
+            if durationSeconds <= 0 {
+                Task { await loadAudioDuration() }
+            }
             timer?.invalidate()
             timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { _ in
                 currentSeconds = player.currentTime().seconds.isFinite ? player.currentTime().seconds : 0
-                let dur = player.currentItem?.duration.seconds ?? durationSeconds
-                if dur.isFinite, dur > 0 {
-                    durationSeconds = dur
-                }
                 if durationSeconds > 0, currentSeconds >= durationSeconds {
                     isPlaying = false
                     timer?.invalidate()
@@ -505,6 +497,28 @@ struct InlineAudioMessageView: View {
         let mins = total / 60
         let secs = total % 60
         return "\(mins):\(String(format: "%02d", secs))"
+    }
+
+    private func loadAudioDuration() async {
+        let asset = AVURLAsset(url: audioURL)
+        do {
+            let loaded = try await asset.load(.duration)
+            let secs = loaded.seconds
+            if secs.isFinite, secs > 0 {
+                await MainActor.run { durationSeconds = secs }
+                return
+            }
+        } catch {
+        }
+        do {
+            let (data, _) = try await URLSession.shared.data(from: audioURL)
+            let audioPlayer = try AVAudioPlayer(data: data)
+            let secs = audioPlayer.duration
+            if secs.isFinite, secs > 0 {
+                await MainActor.run { durationSeconds = secs }
+            }
+        } catch {
+        }
     }
 }
 

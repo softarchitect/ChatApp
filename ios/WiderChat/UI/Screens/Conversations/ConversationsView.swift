@@ -129,6 +129,74 @@ struct ConversationsView: View {
 
     var selectionMode: Bool { !selectedConversationIds.isEmpty }
 
+    private var readFilterTitle: String {
+        if vm.locale == .ar {
+            switch readFilter {
+            case .all: return "القراءة: الكل"
+            case .read: return "القراءة: مقروء"
+            case .unread: return "القراءة: غير مقروء"
+            }
+        }
+        switch readFilter {
+        case .all: return "Read: All"
+        case .read: return "Read: Read"
+        case .unread: return "Read: Unread"
+        }
+    }
+
+    private var assignmentFilterTitle: String {
+        if vm.locale == .ar {
+            switch assignmentFilter {
+            case .all: return "التعيين: الكل"
+            case .my: return "التعيين: محادثاتي"
+            case .unassigned: return "التعيين: غير معين"
+            }
+        }
+        switch assignmentFilter {
+        case .all: return "Assignment: All"
+        case .my: return "Assignment: My conversations"
+        case .unassigned: return "Assignment: Unassigned"
+        }
+    }
+
+    private var satisfactionFilterTitle: String {
+        if vm.locale == .ar {
+            switch satisfactionFilter {
+            case .all: return "الرضا: الكل"
+            case .satisfied: return "الرضا: راضٍ"
+            case .neutral: return "الرضا: محايد"
+            case .unsatisfied: return "الرضا: غير راضٍ"
+            case .noRating: return "الرضا: بدون تقييم"
+            }
+        }
+        switch satisfactionFilter {
+        case .all: return "Satisfaction: All"
+        case .satisfied: return "Satisfaction: Satisfied"
+        case .neutral: return "Satisfaction: Neutral"
+        case .unsatisfied: return "Satisfaction: Unsatisfied"
+        case .noRating: return "Satisfaction: No rating"
+        }
+    }
+
+    private var sortFilterTitle: String {
+        if vm.locale == .ar {
+            switch sortFilter {
+            case .latest: return "الترتيب: الأحدث"
+            case .createdNewest: return "الترتيب: إنشاء (الأحدث)"
+            case .createdOldest: return "الترتيب: إنشاء (الأقدم)"
+            case .updatedNewest: return "الترتيب: تحديث (الأحدث)"
+            case .updatedOldest: return "الترتيب: تحديث (الأقدم)"
+            }
+        }
+        switch sortFilter {
+        case .latest: return "Sort: Latest"
+        case .createdNewest: return "Sort: Created (Newest)"
+        case .createdOldest: return "Sort: Created (Oldest)"
+        case .updatedNewest: return "Sort: Updated (Newest)"
+        case .updatedOldest: return "Sort: Updated (Oldest)"
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack {
@@ -207,59 +275,19 @@ struct ConversationsView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         TabChip(
-                            title: vm.locale == .ar
-                                ? (readFilter == .all ? "القراءة: الكل" : (readFilter == .read ? "القراءة: مقروء" : "القراءة: غير مقروء"))
-                                : (readFilter == .all ? "Read: All" : (readFilter == .read ? "Read: Read" : "Read: Unread")),
+                            title: readFilterTitle,
                             selected: readFilter != .all
                         ) { showReadFilterDialog = true }
                         TabChip(
-                            title: vm.locale == .ar
-                                ? (assignmentFilter == .all ? "التعيين: الكل" : (assignmentFilter == .my ? "التعيين: محادثاتي" : "التعيين: غير معين"))
-                                : (assignmentFilter == .all ? "Assignment: All" : (assignmentFilter == .my ? "Assignment: My conversations" : "Assignment: Unassigned")),
+                            title: assignmentFilterTitle,
                             selected: assignmentFilter != .all
                         ) { showAssignmentFilterDialog = true }
                         TabChip(
-                            title: vm.locale == .ar
-                                ? {
-                                    switch satisfactionFilter {
-                                    case .all: return "الرضا: الكل"
-                                    case .satisfied: return "الرضا: راضٍ"
-                                    case .neutral: return "الرضا: محايد"
-                                    case .unsatisfied: return "الرضا: غير راضٍ"
-                                    case .noRating: return "الرضا: بدون تقييم"
-                                    }
-                                }()
-                                : {
-                                    switch satisfactionFilter {
-                                    case .all: return "Satisfaction: All"
-                                    case .satisfied: return "Satisfaction: Satisfied"
-                                    case .neutral: return "Satisfaction: Neutral"
-                                    case .unsatisfied: return "Satisfaction: Unsatisfied"
-                                    case .noRating: return "Satisfaction: No rating"
-                                    }
-                                }(),
+                            title: satisfactionFilterTitle,
                             selected: satisfactionFilter != .all
                         ) { showSatisfactionFilterDialog = true }
                         TabChip(
-                            title: vm.locale == .ar
-                                ? {
-                                    switch sortFilter {
-                                    case .latest: return "الترتيب: الأحدث"
-                                    case .createdNewest: return "الترتيب: إنشاء (الأحدث)"
-                                    case .createdOldest: return "الترتيب: إنشاء (الأقدم)"
-                                    case .updatedNewest: return "الترتيب: تحديث (الأحدث)"
-                                    case .updatedOldest: return "الترتيب: تحديث (الأقدم)"
-                                    }
-                                }()
-                                : {
-                                    switch sortFilter {
-                                    case .latest: return "Sort: Latest"
-                                    case .createdNewest: return "Sort: Created (Newest)"
-                                    case .createdOldest: return "Sort: Created (Oldest)"
-                                    case .updatedNewest: return "Sort: Updated (Newest)"
-                                    case .updatedOldest: return "Sort: Updated (Oldest)"
-                                    }
-                                }(),
+                            title: sortFilterTitle,
                             selected: sortFilter != .latest
                         ) { showSortFilterDialog = true }
                         TabChip(
