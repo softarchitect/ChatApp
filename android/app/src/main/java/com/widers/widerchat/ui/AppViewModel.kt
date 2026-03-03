@@ -2,7 +2,9 @@ package com.widers.widerchat.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.widers.widerchat.BuildConfig
 import com.widers.widerchat.data.remote.ApiHttpException
+import com.widers.widerchat.data.realtime.PusherRealtimeClient
 import com.widers.widerchat.data.repository.NetworkChatRepository
 import com.widers.widerchat.domain.model.AppLocale
 import com.widers.widerchat.domain.model.AppScreen
@@ -18,6 +20,7 @@ import com.widers.widerchat.domain.model.ConversationStatus
 import com.widers.widerchat.domain.model.MessageDeliveryStatus
 import com.widers.widerchat.domain.model.MessageSender
 import com.widers.widerchat.domain.model.MessageType
+import com.widers.widerchat.domain.model.WorkspaceOption
 import com.widers.widerchat.domain.repository.ChatRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -42,8 +45,14 @@ data class AppUiState(
     val actionStatus: String? = null,
     val contactsLoading: Boolean = false,
     val isChatLoading: Boolean = false,
+    val hasMoreActiveMessages: Boolean = false,
+    val isLoadingMoreActiveMessages: Boolean = false,
     val profileName: String = "",
     val profileEmail: String = "",
+    val currentCompanyId: Long? = null,
+    val availableWorkspaces: List<WorkspaceOption> = emptyList(),
+    val hasMoreConversations: Boolean = false,
+    val isLoadingMoreConversations: Boolean = false,
     val availableTags: List<AvailableTag> = emptyList(),
     val availableAgents: List<AvailableAgent> = emptyList(),
     val availableCustomFields: List<AvailableCustomField> = emptyList(),
@@ -70,6 +79,15 @@ class AppViewModel(
     val uiState: StateFlow<AppUiState> = _uiState.asStateFlow()
     private val localOutgoingByConversation = mutableMapOf<String, MutableList<ChatMessage>>()
     private var activeChatPollingJob: Job? = null
+    private var realtimeConversationsRefreshJob: Job? = null
+    private var realtimeActiveChatRefreshJob: Job? = null
+    private val realtimeClient = PusherRealtimeClient(
+        key = BuildConfig.PUSHER_KEY,
+        cluster = BuildConfig.PUSHER_CLUSTER,
+        onGeneralEvent = ::onRealtimeGeneralEvent
+    )
+    private var pendingNotificationChatId: String? = null
+    private var latestPushToken: String? = null
 
     fun login(email: String, password: String) {
         if (email.isBlank() || password.isBlank()) {
@@ -84,22 +102,25 @@ class AppViewModel(
                     _uiState.value = _uiState.value.copy(isLoading = false, loginError = true)
                     return@launch
                 }
-                val conversations = repository.getConversations()
                 val (profileName, profileEmail) = networkRepo()?.currentUserSnapshot() ?: (null to null)
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
                     isLoggedIn = true,
                     screen = AppScreen.CONVERSATIONS,
                     loginError = false,
-                    conversations = conversations,
                     profileName = profileName.orEmpty(),
-                    profileEmail = profileEmail.orEmpty()
+                    profileEmail = profileEmail.orEmpty(),
+                    currentCompanyId = networkRepo()?.currentCompanyIdSnapshot(),
+                    availableWorkspaces = networkRepo()?.availableWorkspacesSnapshot().orEmpty(),
+                    hasMoreConversations = networkRepo()?.hasMoreConversationsSnapshot() ?: false,
+                    isLoadingMoreConversations = networkRepo()?.isLoadingMoreConversationsSnapshot() ?: false
                 )
-                refreshAvailableTags()
-                refreshAvailableAgents()
-                refreshAvailableTemplates()
-                refreshAvailableFlows()
-                refreshAvailableReplies()
+                networkRepo()?.currentCompanyIdSnapshot()?.let { realtimeClient.connect(it) }
+                launchPostLoginDataWarmup()
+                pendingNotificationChatId?.let {
+                    pendingNotificationChatId = null
+                    openChat(it)
+                }
             } catch (_: Exception) {
                 _uiState.value = _uiState.value.copy(isLoading = false, loginError = true)
             }
@@ -118,22 +139,25 @@ class AppViewModel(
             try {
                 _uiState.value = _uiState.value.copy(isLoading = true, loginError = false)
                 repo.restoreSession(token = token, companyId = companyId)
-                val conversations = repository.getConversations()
                 val (profileName, profileEmail) = repo.currentUserSnapshot()
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
                     isLoggedIn = true,
                     screen = AppScreen.CONVERSATIONS,
                     loginError = false,
-                    conversations = conversations,
                     profileName = profileName.orEmpty().ifBlank { fallbackProfileName.trim() },
-                    profileEmail = profileEmail.orEmpty().ifBlank { fallbackProfileEmail.trim() }
+                    profileEmail = profileEmail.orEmpty().ifBlank { fallbackProfileEmail.trim() },
+                    currentCompanyId = repo.currentCompanyIdSnapshot(),
+                    availableWorkspaces = repo.availableWorkspacesSnapshot(),
+                    hasMoreConversations = repo.hasMoreConversationsSnapshot(),
+                    isLoadingMoreConversations = repo.isLoadingMoreConversationsSnapshot()
                 )
-                refreshAvailableTags()
-                refreshAvailableAgents()
-                refreshAvailableTemplates()
-                refreshAvailableFlows()
-                refreshAvailableReplies()
+                repo.currentCompanyIdSnapshot()?.let { realtimeClient.connect(it) }
+                launchPostLoginDataWarmup()
+                pendingNotificationChatId?.let {
+                    pendingNotificationChatId = null
+                    openChat(it)
+                }
             } catch (_: Exception) {
                 _uiState.value = _uiState.value.copy(isLoading = false, isLoggedIn = false, loginError = true)
             }
@@ -145,17 +169,68 @@ class AppViewModel(
         return current.token to current.companyId
     }
 
+    fun switchWorkspace(companyId: Long) {
+        val repo = networkRepo() ?: return
+        if (companyId <= 0L || repo.currentCompanyIdSnapshot() == companyId) return
+        viewModelScope.launch(Dispatchers.IO) {
+            _uiState.value = _uiState.value.copy(isLoading = true)
+            try {
+                val switched = repo.switchWorkspace(companyId)
+                if (!switched) {
+                    _uiState.value = _uiState.value.copy(
+                        isLoading = false,
+                        actionStatus = "Failed: unable to switch workspace"
+                    )
+                    return@launch
+                }
+                val conversations = repository.getConversations()
+                realtimeClient.setActiveChat(null)
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    screen = AppScreen.CONVERSATIONS,
+                    activeChatId = null,
+                    activeMessages = emptyList(),
+                    isChatLoading = false,
+                    conversations = conversations,
+                    currentCompanyId = repo.currentCompanyIdSnapshot(),
+                    availableWorkspaces = repo.availableWorkspacesSnapshot(),
+                    actionStatus = "Workspace switched"
+                )
+                repo.currentCompanyIdSnapshot()?.let { realtimeClient.connect(it) }
+                refreshAvailableTags()
+                refreshAvailableAgents()
+                refreshAvailableTemplates()
+                refreshAvailableFlows()
+                refreshAvailableReplies()
+            } catch (_: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    actionStatus = "Failed: unable to switch workspace"
+                )
+            }
+        }
+    }
+
     fun logout() {
         stopActiveChatPolling()
+        realtimeClient.setActiveChat(null)
+        realtimeClient.disconnect()
+        pendingNotificationChatId = null
         _uiState.value = _uiState.value.copy(
             isLoggedIn = false,
             screen = AppScreen.LOGIN,
             activeChatId = null,
             activeMessages = emptyList(),
             isChatLoading = false,
+            hasMoreActiveMessages = false,
+            isLoadingMoreActiveMessages = false,
             actionStatus = null,
             profileName = "",
             profileEmail = "",
+            currentCompanyId = null,
+            availableWorkspaces = emptyList(),
+            hasMoreConversations = false,
+            isLoadingMoreConversations = false,
             availableAgents = emptyList(),
             availableCustomFields = emptyList(),
             availableTemplates = emptyList(),
@@ -168,6 +243,23 @@ class AppViewModel(
         _uiState.value = _uiState.value.copy(screen = screen)
     }
 
+    fun onNotificationOpenChat(chatId: String) {
+        val normalized = chatId.trim()
+        if (normalized.isEmpty()) return
+        if (_uiState.value.isLoggedIn) {
+            openChat(normalized)
+        } else {
+            pendingNotificationChatId = normalized
+        }
+    }
+
+    fun onPushTokenReceived(token: String) {
+        val normalized = token.trim()
+        if (normalized.isEmpty() || normalized == latestPushToken) return
+        latestPushToken = normalized
+        // Backend token registration endpoint not available yet.
+    }
+
     fun setLocale(locale: AppLocale) {
         _uiState.value = _uiState.value.copy(locale = locale)
     }
@@ -178,12 +270,15 @@ class AppViewModel(
 
     fun openChat(conversationId: String) {
         stopActiveChatPolling()
+        realtimeClient.setActiveChat(conversationId)
         val preselectedConversation = _uiState.value.conversations.firstOrNull { it.id == conversationId }
         _uiState.value = _uiState.value.copy(
             activeChatId = conversationId,
             screen = AppScreen.CHAT,
             activeMessages = emptyList(),
             isChatLoading = true,
+            hasMoreActiveMessages = false,
+            isLoadingMoreActiveMessages = false,
             conversations = _uiState.value.conversations.map {
                 if (it.id == conversationId) it.copy(unreadCount = 0) else it
             }
@@ -193,7 +288,10 @@ class AppViewModel(
                 conversationId.toLongOrNull()?.let { contactId ->
                     networkRepo()?.updateRead(contactId, true)
                 }
-                val messages = mergeWithLocalOutgoing(conversationId, repository.getMessages(conversationId))
+                val messages = mergeWithLocalOutgoing(
+                    conversationId,
+                    fetchLatestMessages(conversationId, resetHistory = true)
+                )
                 val conversations = repository.getConversations()
                 val mergedConversations = if (conversations.any { it.id == conversationId }) {
                     conversations
@@ -217,7 +315,9 @@ class AppViewModel(
                         activeMessages = messages,
                         conversations = mergedConversations.map {
                             if (it.id == conversationId) it.copy(unreadCount = 0) else it
-                        }
+                        },
+                        hasMoreActiveMessages = networkRepo()?.hasMoreMessagesSnapshot(conversationId) ?: false,
+                        isLoadingMoreActiveMessages = networkRepo()?.isLoadingMoreMessagesSnapshot(conversationId) ?: false
                     )
                 }
                 startActiveChatPolling(conversationId)
@@ -231,8 +331,35 @@ class AppViewModel(
 
     fun backToConversations() {
         stopActiveChatPolling()
-        _uiState.value = _uiState.value.copy(screen = AppScreen.CONVERSATIONS, isChatLoading = false)
+        realtimeClient.setActiveChat(null)
+        _uiState.value = _uiState.value.copy(
+            screen = AppScreen.CONVERSATIONS,
+            isChatLoading = false,
+            hasMoreActiveMessages = false,
+            isLoadingMoreActiveMessages = false
+        )
         refreshConversations()
+    }
+
+    fun loadOlderMessagesForActiveChat() {
+        val conversationId = _uiState.value.activeChatId ?: return
+        val repo = networkRepo() ?: return
+        if (_uiState.value.isLoadingMoreActiveMessages || !_uiState.value.hasMoreActiveMessages) return
+        viewModelScope.launch(Dispatchers.IO) {
+            _uiState.value = _uiState.value.copy(isLoadingMoreActiveMessages = true)
+            try {
+                val older = mergeWithLocalOutgoing(conversationId, repo.loadOlderMessagesPage(conversationId))
+                if (_uiState.value.activeChatId == conversationId) {
+                    _uiState.value = _uiState.value.copy(
+                        activeMessages = older,
+                        hasMoreActiveMessages = repo.hasMoreMessagesSnapshot(conversationId),
+                        isLoadingMoreActiveMessages = false
+                    )
+                }
+            } catch (_: Exception) {
+                _uiState.value = _uiState.value.copy(isLoadingMoreActiveMessages = false)
+            }
+        }
     }
 
     fun sendMessage(text: String) {
@@ -252,7 +379,7 @@ class AppViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             runAction {
                 repository.appendMessage(msg)
-                val messages = mergeWithLocalOutgoing(convoId, repository.getMessages(convoId))
+                val messages = mergeWithLocalOutgoing(convoId, fetchLatestMessages(convoId))
                 val conversations = repository.getConversations()
                 _uiState.value = _uiState.value.copy(activeMessages = messages, conversations = conversations, actionStatus = "Message sent")
             }
@@ -265,7 +392,7 @@ class AppViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             runAction {
                 repository.addNote(convoId, text.trim())
-                val messages = repository.getMessages(convoId)
+                val messages = fetchLatestMessages(convoId)
                 val conversations = repository.getConversations()
                 _uiState.value = _uiState.value.copy(
                     activeMessages = messages,
@@ -306,7 +433,7 @@ class AppViewModel(
                     fileName = fileName,
                     fileBytes = fileBytes
                 )
-                val messages = mergeWithLocalOutgoing(convoId, repository.getMessages(convoId))
+                val messages = mergeWithLocalOutgoing(convoId, fetchLatestMessages(convoId))
                 val conversations = repository.getConversations()
                 _uiState.value = _uiState.value.copy(
                     activeMessages = messages,
@@ -332,7 +459,7 @@ class AppViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             runAction {
                 repository.updateConversationStatus(convoId, newStatus)
-                val messages = repository.getMessages(convoId)
+                val messages = fetchLatestMessages(convoId)
                 val conversations = repository.getConversations()
                 _uiState.value = _uiState.value.copy(
                     activeMessages = messages,
@@ -355,7 +482,7 @@ class AppViewModel(
                 repository.updateConversationStatus(conversationId, newStatus)
                 val conversations = repository.getConversations()
                 val activeMessages = if (_uiState.value.activeChatId == conversationId) {
-                    repository.getMessages(conversationId)
+                    fetchLatestMessages(conversationId)
                 } else {
                     _uiState.value.activeMessages
                 }
@@ -416,7 +543,7 @@ class AppViewModel(
                 networkRepo()?.attachTag(contactId, tagId)
                 val conversations = repository.getConversations()
                 val activeMessages = if (_uiState.value.activeChatId == convoId) {
-                    repository.getMessages(convoId)
+                    fetchLatestMessages(convoId)
                 } else {
                     _uiState.value.activeMessages
                 }
@@ -437,7 +564,7 @@ class AppViewModel(
                 networkRepo()?.detachTag(contactId, tagId)
                 val conversations = repository.getConversations()
                 val activeMessages = if (_uiState.value.activeChatId == convoId) {
-                    repository.getMessages(convoId)
+                    fetchLatestMessages(convoId)
                 } else {
                     _uiState.value.activeMessages
                 }
@@ -480,7 +607,7 @@ class AppViewModel(
             // Keep replies fresh in case backend-side text changed.
             refreshAvailableReplies()
             if (_uiState.value.activeChatId == convoId) {
-                val refreshed = mergeWithLocalOutgoing(convoId, repository.getMessages(convoId))
+                val refreshed = mergeWithLocalOutgoing(convoId, fetchLatestMessages(convoId))
                 _uiState.value = _uiState.value.copy(activeMessages = refreshed)
             }
         }
@@ -854,13 +981,48 @@ class AppViewModel(
 
     private fun refreshConversations() {
         viewModelScope.launch(Dispatchers.IO) {
+            val repo = networkRepo()
             val conversations = repository.getConversations()
-            _uiState.value = _uiState.value.copy(conversations = conversations)
+            _uiState.value = _uiState.value.copy(
+                conversations = conversations,
+                hasMoreConversations = repo?.hasMoreConversationsSnapshot() ?: false,
+                isLoadingMoreConversations = repo?.isLoadingMoreConversationsSnapshot() ?: false
+            )
         }
     }
 
     fun refreshConversationsList() {
-        refreshConversations()
+        viewModelScope.launch(Dispatchers.IO) {
+            val repo = networkRepo()
+            val conversations = if (repo != null) {
+                repo.refreshConversationsFirstPage()
+            } else {
+                repository.getConversations()
+            }
+            _uiState.value = _uiState.value.copy(
+                conversations = conversations,
+                hasMoreConversations = repo?.hasMoreConversationsSnapshot() ?: false,
+                isLoadingMoreConversations = repo?.isLoadingMoreConversationsSnapshot() ?: false
+            )
+        }
+    }
+
+    fun loadMoreConversations() {
+        val repo = networkRepo() ?: return
+        if (_uiState.value.isLoadingMoreConversations || !_uiState.value.hasMoreConversations) return
+        viewModelScope.launch(Dispatchers.IO) {
+            _uiState.value = _uiState.value.copy(isLoadingMoreConversations = true)
+            try {
+                val conversations = repo.loadMoreConversationsPage()
+                _uiState.value = _uiState.value.copy(
+                    conversations = conversations,
+                    hasMoreConversations = repo.hasMoreConversationsSnapshot(),
+                    isLoadingMoreConversations = false
+                )
+            } catch (_: Exception) {
+                _uiState.value = _uiState.value.copy(isLoadingMoreConversations = false)
+            }
+        }
     }
 
     fun refreshAvailableTags() {
@@ -1111,6 +1273,39 @@ class AppViewModel(
 
     private fun networkRepo(): NetworkChatRepository? = repository as? NetworkChatRepository
 
+    private suspend fun fetchLatestMessages(conversationId: String, resetHistory: Boolean = false): List<ChatMessage> {
+        val repo = networkRepo()
+        return if (repo != null) {
+            repo.refreshMessagesFirstPage(conversationId, resetLoaded = resetHistory)
+        } else {
+            repository.getMessages(conversationId)
+        }
+    }
+
+    private fun launchPostLoginDataWarmup() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val repo = networkRepo()
+                val conversations = if (repo != null) {
+                    repo.refreshConversationsFirstPage()
+                } else {
+                    repository.getConversations()
+                }
+                _uiState.value = _uiState.value.copy(
+                    conversations = conversations,
+                    hasMoreConversations = repo?.hasMoreConversationsSnapshot() ?: false,
+                    isLoadingMoreConversations = repo?.isLoadingMoreConversationsSnapshot() ?: false
+                )
+            } catch (_: Exception) {
+            }
+        }
+        refreshAvailableTags()
+        refreshAvailableAgents()
+        refreshAvailableTemplates()
+        refreshAvailableFlows()
+        refreshAvailableReplies()
+    }
+
     private fun addLocalOutgoing(message: ChatMessage) {
         val bucket = localOutgoingByConversation.getOrPut(message.conversationId) { mutableListOf() }
         bucket += message
@@ -1136,12 +1331,14 @@ class AppViewModel(
                 if (_uiState.value.activeChatId != conversationId || _uiState.value.screen != AppScreen.CHAT) {
                     break
                 }
-                val latest = mergeWithLocalOutgoing(conversationId, repository.getMessages(conversationId))
+                val latest = mergeWithLocalOutgoing(conversationId, fetchLatestMessages(conversationId))
                 val conversations = repository.getConversations()
                 if (_uiState.value.activeChatId == conversationId) {
                     _uiState.value = _uiState.value.copy(
                         activeMessages = latest,
-                        conversations = conversations
+                        conversations = conversations,
+                        hasMoreActiveMessages = networkRepo()?.hasMoreMessagesSnapshot(conversationId) ?: false,
+                        isLoadingMoreActiveMessages = networkRepo()?.isLoadingMoreMessagesSnapshot(conversationId) ?: false
                     )
                 }
             }
@@ -1151,6 +1348,51 @@ class AppViewModel(
     private fun stopActiveChatPolling() {
         activeChatPollingJob?.cancel()
         activeChatPollingJob = null
+    }
+
+    private fun onRealtimeGeneralEvent(channel: String) {
+        if (!_uiState.value.isLoggedIn) return
+        if (channel.startsWith("chatupdate.")) {
+            scheduleRealtimeConversationsRefresh()
+            _uiState.value.activeChatId?.let { scheduleRealtimeActiveChatRefresh(it) }
+        } else if (channel.startsWith("chat.")) {
+            val activeId = _uiState.value.activeChatId ?: return
+            val eventChatId = channel.removePrefix("chat.").trim()
+            if (eventChatId == activeId) {
+                scheduleRealtimeActiveChatRefresh(activeId)
+            }
+            scheduleRealtimeConversationsRefresh()
+        }
+    }
+
+    private fun scheduleRealtimeConversationsRefresh() {
+        realtimeConversationsRefreshJob?.cancel()
+        realtimeConversationsRefreshJob = viewModelScope.launch(Dispatchers.IO) {
+            delay(250)
+            val repo = networkRepo()
+            val conversations = repository.getConversations()
+            _uiState.value = _uiState.value.copy(
+                conversations = conversations,
+                hasMoreConversations = repo?.hasMoreConversationsSnapshot() ?: false,
+                isLoadingMoreConversations = repo?.isLoadingMoreConversationsSnapshot() ?: false
+            )
+        }
+    }
+
+    private fun scheduleRealtimeActiveChatRefresh(conversationId: String) {
+        realtimeActiveChatRefreshJob?.cancel()
+        realtimeActiveChatRefreshJob = viewModelScope.launch(Dispatchers.IO) {
+            delay(150)
+            if (_uiState.value.activeChatId != conversationId || _uiState.value.screen != AppScreen.CHAT) return@launch
+            val latest = mergeWithLocalOutgoing(conversationId, fetchLatestMessages(conversationId))
+            if (_uiState.value.activeChatId == conversationId) {
+                _uiState.value = _uiState.value.copy(
+                    activeMessages = latest,
+                    hasMoreActiveMessages = networkRepo()?.hasMoreMessagesSnapshot(conversationId) ?: false,
+                    isLoadingMoreActiveMessages = networkRepo()?.isLoadingMoreMessagesSnapshot(conversationId) ?: false
+                )
+            }
+        }
     }
 
     private suspend fun runAction(block: suspend () -> Unit) {
@@ -1163,5 +1405,10 @@ class AppViewModel(
         } finally {
             _uiState.value = _uiState.value.copy(isActionLoading = false)
         }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        realtimeClient.disconnect()
     }
 }

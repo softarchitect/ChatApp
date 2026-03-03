@@ -127,13 +127,19 @@ class WidersApiService(
                 .put("limit", limit)
         )
 
-    fun getChatMessages(session: SessionContext, contactId: Long, afterId: Long = 0): JSONObject =
-        postJson(
-            "/api/wpbox/getMessages",
-            sessionPayload(session)
-                .put("contact_id", contactId)
-                .put("after_id", afterId)
-        )
+    fun getChatMessages(
+        session: SessionContext,
+        contactId: Long,
+        page: Int? = null,
+        limit: Int? = null,
+        afterId: Long? = null
+    ): JSONObject {
+        val payload = sessionPayload(session).put("contact_id", contactId)
+        if (page != null) payload.put("page", page)
+        if (limit != null) payload.put("limit", limit)
+        if (afterId != null) payload.put("after_id", afterId)
+        return postJson("/api/wpbox/getMessages", payload)
+    }
 
     fun addNote(session: SessionContext, contactId: Long, note: String): JSONObject =
         postJson(

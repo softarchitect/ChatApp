@@ -45,6 +45,12 @@ struct AvailableReply: Identifiable {
     let text: String
 }
 
+struct WorkspaceOption: Identifiable, Equatable {
+    let companyId: Int
+    let name: String
+    var id: Int { companyId }
+}
+
 final class AppViewModel: ObservableObject {
     private enum SessionKeys {
         static let token = "widers.session.token"
@@ -66,6 +72,8 @@ final class AppViewModel: ObservableObject {
     @Published var actionStatus: String?
     @Published var contactsLoading = false
     @Published var isChatLoading = false
+    @Published var hasMoreActiveMessages = false
+    @Published var isLoadingMoreActiveMessages = false
     @Published var newConversationContacts: [NewConversationContact] = []
     @Published var availableTags: [AvailableTag] = []
     @Published var availableAgents: [AvailableAgent] = []
@@ -75,8 +83,23 @@ final class AppViewModel: ObservableObject {
     @Published var availableReplies: [AvailableReply] = []
     @Published var profileName = ""
     @Published var profileEmail = ""
+    @Published var currentCompanyId: Int?
+    @Published var availableWorkspaces: [WorkspaceOption] = []
+    @Published var hasMoreConversations = false
+    @Published var isLoadingMoreConversations = false
     private var localOutgoingByConversation: [String: [ChatMessage]] = [:]
     private var chatPollingTask: Task<Void, Never>?
+    private var realtimeConversationsRefreshTask: Task<Void, Never>?
+    private var realtimeActiveChatRefreshTask: Task<Void, Never>?
+    private var pendingNotificationChatId: String?
+    private var latestPushToken: String?
+    private lazy var realtimeClient = PusherRealtimeClient(
+        key: "2a6e447d8a701a4d7fe7",
+        cluster: "eu",
+        onGeneralEvent: { [weak self] channel in
+            self?.handleRealtimeGeneralEvent(channel: channel)
+        }
+    )
 
     private let repository: ChatRepository
     private let secureStore: SecureSessionStore
@@ -106,13 +129,6 @@ final class AppViewModel: ObservableObject {
                 loginError = tr(locale, .loginError)
                 return
             }
-            let loaded = await repository.getConversations()
-            conversations = loaded
-            await refreshAvailableTags()
-            await refreshAvailableAgents()
-            await refreshAvailableTemplates()
-            await refreshAvailableFlows()
-            await refreshAvailableReplies()
             let profile = repository.currentUserSnapshot()
             profileName = profile.name ?? ""
             profileEmail = profile.email ?? ""
@@ -124,12 +140,21 @@ final class AppViewModel: ObservableObject {
                 secureStore.saveString(String(session.companyId), for: SessionKeys.companyId)
                 secureStore.saveString(profileName, for: SessionKeys.profileName)
                 secureStore.saveString(profileEmail, for: SessionKeys.profileEmail)
+                realtimeClient.connect(companyId: session.companyId)
+            }
+            refreshWorkspaceState()
+            launchPostLoginDataWarmup()
+            if let pending = pendingNotificationChatId {
+                pendingNotificationChatId = nil
+                openChat(id: pending)
             }
         }
     }
 
     func logout() {
         stopChatPolling()
+        realtimeClient.disconnect()
+        pendingNotificationChatId = nil
         secureStore.removeValue(for: SessionKeys.token)
         secureStore.removeValue(for: SessionKeys.companyId)
         isLoggedIn = false
@@ -137,9 +162,15 @@ final class AppViewModel: ObservableObject {
         activeChatId = nil
         activeMessages = []
         isChatLoading = false
+        hasMoreActiveMessages = false
+        isLoadingMoreActiveMessages = false
         actionStatus = nil
         profileName = ""
         profileEmail = ""
+        currentCompanyId = nil
+        availableWorkspaces = []
+        hasMoreConversations = false
+        isLoadingMoreConversations = false
         availableAgents = []
         availableCustomFields = []
         availableTemplates = []
@@ -151,10 +182,13 @@ final class AppViewModel: ObservableObject {
 
     func openChat(id: String) {
         stopChatPolling()
+        realtimeClient.setActiveChat(chatId: id)
         activeChatId = id
         screen = .chat
         activeMessages = []
         isChatLoading = true
+        hasMoreActiveMessages = false
+        isLoadingMoreActiveMessages = false
         conversations = conversations.map { convo in
             if convo.id == id {
                 var updated = convo
@@ -172,7 +206,7 @@ final class AppViewModel: ObservableObject {
             if let contactId = Int(id) {
                 _ = await repository.updateRead(contactId: contactId, status: true)
             }
-            let remote = await repository.getMessages(conversationId: id)
+            let remote = await fetchLatestMessages(conversationId: id, resetHistory: true)
             guard self.activeChatId == id else { return }
             activeMessages = mergeWithLocalOutgoing(conversationId: id, remote: remote)
             conversations = await repository.getConversations().map { convo in
@@ -186,19 +220,109 @@ final class AppViewModel: ObservableObject {
 
     func backToConversations() {
         stopChatPolling()
+        realtimeClient.setActiveChat(chatId: nil)
         screen = .conversations
         isChatLoading = false
+        hasMoreActiveMessages = false
+        isLoadingMoreActiveMessages = false
         Task { @MainActor in
             conversations = await repository.getConversations()
         }
     }
 
+    func loadOlderMessagesForActiveChat() async {
+        guard let conversationId = activeChatId, let repo = repository as? WidersRepository else { return }
+        guard hasMoreActiveMessages, !isLoadingMoreActiveMessages else { return }
+        isLoadingMoreActiveMessages = true
+        let older = await repo.loadOlderMessagesPage(conversationId: conversationId)
+        if activeChatId == conversationId {
+            activeMessages = mergeWithLocalOutgoing(conversationId: conversationId, remote: older)
+            hasMoreActiveMessages = repo.hasMoreMessagesSnapshot(conversationId: conversationId)
+            isLoadingMoreActiveMessages = repo.isLoadingMoreMessagesSnapshot(conversationId: conversationId)
+        } else {
+            isLoadingMoreActiveMessages = false
+        }
+    }
+
     func refreshConversationsList() async {
-        conversations = await repository.getConversations()
+        if let repo = repository as? WidersRepository {
+            conversations = await repo.refreshConversationsFirstPage()
+            hasMoreConversations = repo.hasMoreConversationsSnapshot()
+            isLoadingMoreConversations = repo.isLoadingMoreConversationsSnapshot()
+        } else {
+            conversations = await repository.getConversations()
+            hasMoreConversations = false
+            isLoadingMoreConversations = false
+        }
+    }
+
+    func loadMoreConversations() async {
+        guard let repo = repository as? WidersRepository else { return }
+        if isLoadingMoreConversations || !hasMoreConversations { return }
+        isLoadingMoreConversations = true
+        conversations = await repo.loadMoreConversationsPage()
+        hasMoreConversations = repo.hasMoreConversationsSnapshot()
+        isLoadingMoreConversations = repo.isLoadingMoreConversationsSnapshot()
     }
 
     func setScreen(_ next: AppScreen) {
         screen = next
+    }
+
+    func onNotificationOpenChat(chatId: String) {
+        let normalized = chatId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return }
+        if isLoggedIn {
+            openChat(id: normalized)
+        } else {
+            pendingNotificationChatId = normalized
+        }
+    }
+
+    func onPushTokenReceived(token: String) {
+        let normalized = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty, normalized != latestPushToken else { return }
+        latestPushToken = normalized
+        // Backend token registration endpoint is pending.
+    }
+
+    func switchWorkspace(companyId: Int) {
+        guard companyId > 0, let repo = repository as? WidersRepository else { return }
+        guard repo.currentSessionSnapshot()?.companyId != companyId else { return }
+        isLoading = true
+        Task { @MainActor in
+            let switched = repo.switchWorkspace(companyId: companyId)
+            guard switched else {
+                isLoading = false
+                actionStatus = "Failed: unable to switch workspace"
+                return
+            }
+            stopChatPolling()
+            realtimeClient.setActiveChat(chatId: nil)
+            activeChatId = nil
+            activeMessages = []
+            isChatLoading = false
+            hasMoreActiveMessages = false
+            isLoadingMoreActiveMessages = false
+            screen = .conversations
+            conversations = await repo.refreshConversationsFirstPage()
+            await refreshAvailableTags()
+            await refreshAvailableAgents()
+            await refreshAvailableTemplates()
+            await refreshAvailableFlows()
+            await refreshAvailableReplies()
+            if let session = repository.currentSessionSnapshot() {
+                secureStore.saveString(String(session.companyId), for: SessionKeys.companyId)
+            }
+            refreshWorkspaceState()
+            if let session = repository.currentSessionSnapshot() {
+                realtimeClient.connect(companyId: session.companyId)
+            }
+            hasMoreConversations = repo.hasMoreConversationsSnapshot()
+            isLoadingMoreConversations = repo.isLoadingMoreConversationsSnapshot()
+            isLoading = false
+            actionStatus = "Workspace switched"
+        }
     }
 
     func sendMessage(_ text: String) {
@@ -224,7 +348,7 @@ final class AppViewModel: ObservableObject {
             }
             activeMessages = mergeWithLocalOutgoing(
                 conversationId: convoId,
-                remote: await repository.getMessages(conversationId: convoId)
+                remote: await fetchLatestMessages(conversationId: convoId)
             )
             conversations = await repository.getConversations()
             actionStatus = "Message sent"
@@ -265,7 +389,7 @@ final class AppViewModel: ObservableObject {
             }
             activeMessages = mergeWithLocalOutgoing(
                 conversationId: convoId,
-                remote: await repository.getMessages(conversationId: convoId)
+                remote: await fetchLatestMessages(conversationId: convoId)
             )
             conversations = await repository.getConversations()
             actionStatus = "\(kindLabel) sent"
@@ -285,7 +409,7 @@ final class AppViewModel: ObservableObject {
                 actionStatus = "Failed: unable to add note"
                 return
             }
-            activeMessages = await repository.getMessages(conversationId: convoId)
+            activeMessages = await fetchLatestMessages(conversationId: convoId)
             conversations = await repository.getConversations()
             actionStatus = "Note added"
         }
@@ -300,7 +424,7 @@ final class AppViewModel: ObservableObject {
                 actionStatus = "Failed: unable to update conversation status"
                 return
             }
-            activeMessages = await repository.getMessages(conversationId: convoId)
+            activeMessages = await fetchLatestMessages(conversationId: convoId)
             conversations = await repository.getConversations()
             actionStatus = open ? "Conversation reopened" : "Conversation closed"
         }
@@ -374,7 +498,7 @@ final class AppViewModel: ObservableObject {
             }
             conversations = await repository.getConversations()
             if activeChatId == conversationId {
-                activeMessages = await repository.getMessages(conversationId: conversationId)
+                activeMessages = await fetchLatestMessages(conversationId: conversationId)
             }
             actionStatus = open ? "Conversation reopened" : "Conversation closed"
         }
@@ -426,7 +550,7 @@ final class AppViewModel: ObservableObject {
             }
             conversations = await repository.getConversations()
             if activeChatId == id {
-                activeMessages = await repository.getMessages(conversationId: id)
+                activeMessages = await fetchLatestMessages(conversationId: id)
             }
             actionStatus = "Tag attached"
         }
@@ -444,7 +568,7 @@ final class AppViewModel: ObservableObject {
             }
             conversations = await repository.getConversations()
             if activeChatId == id {
-                activeMessages = await repository.getMessages(conversationId: id)
+                activeMessages = await fetchLatestMessages(conversationId: id)
             }
             actionStatus = "Tag detached"
         }
@@ -758,13 +882,25 @@ final class AppViewModel: ObservableObject {
         return formatter.string(from: Date())
     }
 
+    private func fetchLatestMessages(conversationId: String, resetHistory: Bool = false) async -> [ChatMessage] {
+        if let repo = repository as? WidersRepository {
+            let messages = await repo.refreshMessagesFirstPage(conversationId: conversationId, resetLoaded: resetHistory)
+            hasMoreActiveMessages = repo.hasMoreMessagesSnapshot(conversationId: conversationId)
+            isLoadingMoreActiveMessages = repo.isLoadingMoreMessagesSnapshot(conversationId: conversationId)
+            return messages
+        }
+        hasMoreActiveMessages = false
+        isLoadingMoreActiveMessages = false
+        return await repository.getMessages(conversationId: conversationId)
+    }
+
     private func startChatPolling(id: String) {
         chatPollingTask?.cancel()
         chatPollingTask = Task { @MainActor in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 4_000_000_000)
                 guard activeChatId == id, screen == .chat else { break }
-                let remote = await repository.getMessages(conversationId: id)
+                let remote = await fetchLatestMessages(conversationId: id)
                 activeMessages = mergeWithLocalOutgoing(conversationId: id, remote: remote)
                 conversations = await repository.getConversations()
             }
@@ -774,6 +910,46 @@ final class AppViewModel: ObservableObject {
     private func stopChatPolling() {
         chatPollingTask?.cancel()
         chatPollingTask = nil
+    }
+
+    private func handleRealtimeGeneralEvent(channel: String) {
+        guard isLoggedIn else { return }
+        if channel.hasPrefix("chatupdate.") {
+            scheduleRealtimeConversationsRefresh()
+            if let active = activeChatId {
+                scheduleRealtimeActiveChatRefresh(conversationId: active)
+            }
+            return
+        }
+        if channel.hasPrefix("chat.") {
+            scheduleRealtimeConversationsRefresh()
+            let eventChatId = String(channel.dropFirst("chat.".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !eventChatId.isEmpty, eventChatId == activeChatId {
+                scheduleRealtimeActiveChatRefresh(conversationId: eventChatId)
+            }
+        }
+    }
+
+    private func scheduleRealtimeConversationsRefresh() {
+        realtimeConversationsRefreshTask?.cancel()
+        realtimeConversationsRefreshTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            conversations = await repository.getConversations()
+            if let repo = repository as? WidersRepository {
+                hasMoreConversations = repo.hasMoreConversationsSnapshot()
+                isLoadingMoreConversations = repo.isLoadingMoreConversationsSnapshot()
+            }
+        }
+    }
+
+    private func scheduleRealtimeActiveChatRefresh(conversationId: String) {
+        realtimeActiveChatRefreshTask?.cancel()
+        realtimeActiveChatRefreshTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            guard activeChatId == conversationId, screen == .chat else { return }
+            let remote = await fetchLatestMessages(conversationId: conversationId)
+            activeMessages = mergeWithLocalOutgoing(conversationId: conversationId, remote: remote)
+        }
     }
 
     private func parseNewConversationContacts(_ payload: [String: Any]) -> [NewConversationContact] {
@@ -959,18 +1135,18 @@ final class AppViewModel: ObservableObject {
             profileEmail = secureStore.readString(for: SessionKeys.profileEmail) ?? ""
             let probe = await repository.getContactsList()
             if probe != nil {
-                let loaded = await repository.getConversations()
-                conversations = loaded
-                await refreshAvailableTags()
-                await refreshAvailableAgents()
-                await refreshAvailableTemplates()
-                await refreshAvailableFlows()
-                await refreshAvailableReplies()
                 isLoading = false
                 isLoggedIn = true
                 screen = .conversations
                 secureStore.saveString(token, for: SessionKeys.token)
                 secureStore.saveString(String(companyId), for: SessionKeys.companyId)
+                realtimeClient.connect(companyId: companyId)
+                refreshWorkspaceState()
+                launchPostLoginDataWarmup()
+                if let pending = pendingNotificationChatId {
+                    pendingNotificationChatId = nil
+                    openChat(id: pending)
+                }
             } else {
                 repository.clearSession()
                 isLoading = false
@@ -986,6 +1162,10 @@ final class AppViewModel: ObservableObject {
                 availableCustomFields = []
                 availableTemplates = []
                 availableFlows = []
+                availableWorkspaces = []
+                currentCompanyId = nil
+                hasMoreConversations = false
+                isLoadingMoreConversations = false
             }
         }
     }
@@ -995,5 +1175,34 @@ final class AppViewModel: ObservableObject {
         let companyId = Int(secureStore.readString(for: SessionKeys.companyId) ?? "") ?? 0
         guard !token.isEmpty, companyId > 0 else { return }
         restoreSession(token: token, companyId: companyId)
+    }
+
+    private func launchPostLoginDataWarmup() {
+        Task { @MainActor in
+            if let repo = repository as? WidersRepository {
+                conversations = await repo.refreshConversationsFirstPage()
+                hasMoreConversations = repo.hasMoreConversationsSnapshot()
+                isLoadingMoreConversations = repo.isLoadingMoreConversationsSnapshot()
+            } else {
+                conversations = await repository.getConversations()
+                hasMoreConversations = false
+                isLoadingMoreConversations = false
+            }
+        }
+        Task { @MainActor in await refreshAvailableTags() }
+        Task { @MainActor in await refreshAvailableAgents() }
+        Task { @MainActor in await refreshAvailableTemplates() }
+        Task { @MainActor in await refreshAvailableFlows() }
+        Task { @MainActor in await refreshAvailableReplies() }
+    }
+
+    private func refreshWorkspaceState() {
+        guard let repo = repository as? WidersRepository else {
+            currentCompanyId = repository.currentSessionSnapshot()?.companyId
+            availableWorkspaces = []
+            return
+        }
+        currentCompanyId = repo.currentCompanyIdSnapshot()
+        availableWorkspaces = repo.availableWorkspacesSnapshot()
     }
 }

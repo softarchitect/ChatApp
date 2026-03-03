@@ -102,6 +102,11 @@ data class AvailableReply(
     val text: String
 )
 
+data class WorkspaceOption(
+    val companyId: Long,
+    val name: String
+)
+
 data class ChatMessage(
     val id: String,
     val conversationId: String,

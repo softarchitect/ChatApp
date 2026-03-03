@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import com.widers.widerchat.core.TextKey
 import com.widers.widerchat.core.tr
 import com.widers.widerchat.domain.model.AppLocale
+import com.widers.widerchat.domain.model.WorkspaceOption
 
 @Composable
 fun SettingsScreen(
@@ -61,8 +62,11 @@ fun SettingsScreen(
     darkMode: Boolean,
     profileName: String,
     profileEmail: String,
+    currentCompanyId: Long?,
+    availableWorkspaces: List<WorkspaceOption>,
     onLocaleChange: (AppLocale) -> Unit,
     onDarkModeChange: (Boolean) -> Unit,
+    onSwitchWorkspace: (Long) -> Unit,
     onOpenPrivacy: () -> Unit,
     onOpenTerms: () -> Unit,
     onOpenVersion: () -> Unit,
@@ -78,6 +82,7 @@ fun SettingsScreen(
     var showLangDialog by remember { mutableStateOf(false) }
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showProfileDialog by remember { mutableStateOf(false) }
+    var showWorkspaceDialog by remember { mutableStateOf(false) }
     var showTagDialog by remember { mutableStateOf(false) }
     var showReplyDialog by remember { mutableStateOf(false) }
     var showContactDialog by remember { mutableStateOf(false) }
@@ -149,6 +154,16 @@ fun SettingsScreen(
             SettingsTitle(tr(locale, TextKey.ACCOUNT).uppercase())
             FlatGroup {
                 FlatRow(icon = { Icon(Icons.Outlined.Person, null, tint = Color.White) }, iconBg = Color(0xFF3B82F6), label = tr(locale, TextKey.PROFILE), onClick = { showProfileDialog = true })
+                if (availableWorkspaces.size > 1) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
+                    FlatRow(
+                        icon = { Icon(Icons.Outlined.Person, null, tint = Color.White) },
+                        iconBg = Color(0xFF0EA5E9),
+                        label = if (locale == AppLocale.AR) "مساحة العمل" else "Workspace",
+                        value = availableWorkspaces.firstOrNull { it.companyId == currentCompanyId }?.name,
+                        onClick = { showWorkspaceDialog = true }
+                    )
+                }
             }
 
             Spacer(Modifier.height(8.dp))
@@ -245,6 +260,31 @@ fun SettingsScreen(
                 }
             },
             dismissButton = { TextButton(onClick = { showProfileDialog = false }) { Text(tr(locale, TextKey.CLOSE)) } },
+            confirmButton = {}
+        )
+    }
+
+    if (showWorkspaceDialog) {
+        AlertDialog(
+            onDismissRequest = { showWorkspaceDialog = false },
+            title = { Text(if (locale == AppLocale.AR) "تبديل مساحة العمل" else "Switch workspace") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    availableWorkspaces.forEach { workspace ->
+                        TextButton(
+                            onClick = {
+                                showWorkspaceDialog = false
+                                onSwitchWorkspace(workspace.companyId)
+                            },
+                            enabled = workspace.companyId != currentCompanyId
+                        ) {
+                            val prefix = if (workspace.companyId == currentCompanyId) "✓ " else ""
+                            Text(prefix + workspace.name)
+                        }
+                    }
+                }
+            },
+            dismissButton = { TextButton(onClick = { showWorkspaceDialog = false }) { Text(tr(locale, TextKey.CLOSE)) } },
             confirmButton = {}
         )
     }

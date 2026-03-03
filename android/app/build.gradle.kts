@@ -10,6 +10,12 @@ android {
     val apiBaseUrlProvider = providers.gradleProperty("API_BASE_URL")
         .orElse(providers.environmentVariable("API_BASE_URL"))
         .orElse("https://apps.widers.net")
+    val pusherKeyProvider = providers.gradleProperty("PUSHER_KEY")
+        .orElse(providers.environmentVariable("PUSHER_KEY"))
+        .orElse("2a6e447d8a701a4d7fe7")
+    val pusherClusterProvider = providers.gradleProperty("PUSHER_CLUSTER")
+        .orElse(providers.environmentVariable("PUSHER_CLUSTER"))
+        .orElse("eu")
 
     defaultConfig {
         applicationId = "com.widers.widerchat"
@@ -20,6 +26,8 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "API_BASE_URL", "\"${apiBaseUrlProvider.get()}\"")
+        buildConfigField("String", "PUSHER_KEY", "\"${pusherKeyProvider.get()}\"")
+        buildConfigField("String", "PUSHER_CLUSTER", "\"${pusherClusterProvider.get()}\"")
     }
 
     buildTypes {
@@ -46,6 +54,8 @@ android {
 
 dependencies {
 
+    implementation(platform("com.google.firebase:firebase-bom:34.2.0"))
+    implementation("com.google.firebase:firebase-messaging")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
@@ -57,6 +67,7 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.androidx.security.crypto)
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

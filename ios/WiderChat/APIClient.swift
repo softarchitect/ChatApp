@@ -107,8 +107,18 @@ final class WidersAPIClient {
         try await postJSON(path: "/api/chats/search", body: sessionBody(session, extra: ["search": keyword, "page": page, "limit": limit]))
     }
 
-    func getChatMessages(session: APISession, contactId: Int, afterId: Int = 0) async throws -> [String: Any] {
-        try await postJSON(path: "/api/wpbox/getMessages", body: sessionBody(session, extra: ["contact_id": contactId, "after_id": afterId]))
+    func getChatMessages(
+        session: APISession,
+        contactId: Int,
+        page: Int? = nil,
+        limit: Int? = nil,
+        afterId: Int? = nil
+    ) async throws -> [String: Any] {
+        var extra: [String: Any] = ["contact_id": contactId]
+        if let page { extra["page"] = page }
+        if let limit { extra["limit"] = limit }
+        if let afterId { extra["after_id"] = afterId }
+        return try await postJSON(path: "/api/wpbox/getMessages", body: sessionBody(session, extra: extra))
     }
 
     func addNote(session: APISession, contactId: Int, note: String) async throws -> [String: Any] {

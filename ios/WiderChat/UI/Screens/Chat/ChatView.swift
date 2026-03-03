@@ -43,6 +43,7 @@ struct ChatView: View {
     @State private var showContactInfoSheet = false
     @State private var skeletonOpacity = 0.55
     @State private var skeletonShimmerOffset: CGFloat = -240
+    @State private var olderAnchorMessageId: String?
     private let emojiCategories: [String: [String]] = [
         "smileys": ["😀", "😃", "😄", "😁", "😆", "😅", "😂", "🤣", "🙂", "😉", "😍", "🥰", "😘", "😎", "🤔", "😭"],
         "gestures": ["👍", "👎", "👏", "🙌", "🙏", "🤝", "💪", "👌", "✌️", "🤞", "👋", "🤲", "🫶", "💯", "✅", "❌"],
@@ -171,10 +172,24 @@ struct ChatView: View {
                         ZStack(alignment: .bottomTrailing) {
                         ScrollView {
                             LazyVStack(spacing: 10) {
+                                if vm.isLoadingMoreActiveMessages {
+                                    Text(vm.locale == .ar ? "جارٍ تحميل الرسائل الأقدم..." : "Loading older messages...")
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundStyle(AppPalette.textMuted)
+                                        .padding(.top, 4)
+                                }
                                 ForEach(vm.activeMessages) { msg in
                                     MessageBubble(message: msg, darkMode: vm.darkMode)
                                         .frame(maxWidth: .infinity, alignment: msg.sender == .agent ? .trailing : .leading)
                                         .id(msg.id)
+                                        .onAppear {
+                                            if msg.id == vm.activeMessages.first?.id,
+                                               vm.hasMoreActiveMessages,
+                                               !vm.isLoadingMoreActiveMessages {
+                                                olderAnchorMessageId = msg.id
+                                                Task { await vm.loadOlderMessagesForActiveChat() }
+                                            }
+                                        }
                                 }
                                 Color.clear
                                     .frame(height: 1)
@@ -225,6 +240,13 @@ struct ChatView: View {
                                 shouldScrollToLatestOnOpen = false
                             }
                             forceAutoScroll = false
+                        }
+                        .onChange(of: vm.activeMessages.first?.id) { _, _ in
+                            guard let anchorId = olderAnchorMessageId else { return }
+                            withAnimation(.none) {
+                                proxy.scrollTo(anchorId, anchor: .top)
+                            }
+                            olderAnchorMessageId = nil
                         }
                         .onChange(of: isNearBottom) { _, nearBottom in
                             if nearBottom {

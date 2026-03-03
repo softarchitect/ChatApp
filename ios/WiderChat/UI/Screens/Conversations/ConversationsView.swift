@@ -964,6 +964,19 @@ struct ConversationsView: View {
                             visibleConversationCount = min(visibleConversationCount + 30, filtered.count)
                         }
                     }
+                    if visibleConversationCount >= filtered.count && vm.hasMoreConversations {
+                        HStack {
+                            Spacer()
+                            ProgressView()
+                            Spacer()
+                        }
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(AppPalette.surface)
+                        .onAppear {
+                            guard !vm.isLoadingMoreConversations else { return }
+                            Task { await vm.loadMoreConversations() }
+                        }
+                    }
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)

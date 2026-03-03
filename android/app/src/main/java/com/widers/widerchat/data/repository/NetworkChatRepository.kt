@@ -12,6 +12,7 @@ import com.widers.widerchat.domain.model.MessageDeliveryStatus
 import com.widers.widerchat.domain.model.MessageSender
 import com.widers.widerchat.domain.model.MessageType
 import com.widers.widerchat.domain.model.AvailableTag
+import com.widers.widerchat.domain.model.WorkspaceOption
 import com.widers.widerchat.domain.repository.ChatRepository
 import org.json.JSONArray
 import org.json.JSONObject
@@ -22,11 +23,25 @@ import java.util.TimeZone
 class NetworkChatRepository(
     private val api: WidersApiService = WidersApiService(BuildConfig.API_BASE_URL)
 ) : ChatRepository {
+    private data class MessagePagingState(
+        val pageSize: Int = 60,
+        var nextPage: Int = 1,
+        var hasMore: Boolean = true,
+        var isLoading: Boolean = false,
+        var loaded: List<ChatMessage> = emptyList()
+    )
+
     private var session: SessionContext? = null
     private var cacheConversations: List<Conversation> = emptyList()
     private var cacheContactsById: Map<String, String> = emptyMap()
     private var sessionUserName: String? = null
     private var sessionUserEmail: String? = null
+    private var sessionWorkspaces: List<WorkspaceOption> = emptyList()
+    private var conversationsNextPage: Int = 1
+    private var conversationsHasMore: Boolean = true
+    private var conversationsPageSize: Int = 30
+    private var conversationsLoading: Boolean = false
+    private val messagePagingByConversation = mutableMapOf<String, MessagePagingState>()
 
     override suspend fun login(email: String, password: String): Boolean {
         val response = api.login(email, password)
@@ -41,6 +56,7 @@ class NetworkChatRepository(
             return false
         }
         session = SessionContext(token = token, companyId = companyId)
+        sessionWorkspaces = parseWorkspaceOptions(response, companyId)
         val data = response.optJSONObject("data")
         val user = response.optJSONObject("user")
             ?: data?.optJSONObject("user")
@@ -66,105 +82,104 @@ class NetworkChatRepository(
     }
 
     override suspend fun getConversations(): List<Conversation> {
+        if (cacheConversations.isNotEmpty()) return cacheConversations
+        return refreshConversationsFirstPage()
+    }
+
+    suspend fun refreshConversationsFirstPage(): List<Conversation> {
         val activeSession = session ?: return emptyList()
-        val mapped = mutableListOf<Conversation>()
-        var page = 1
-        val pageSize = 30
-        val maxPages = 120
-        while (page <= maxPages) {
-            val response = api.getChatsList(activeSession, page = page, limit = pageSize)
+        conversationsNextPage = 1
+        conversationsHasMore = true
+        cacheConversations = emptyList()
+        val response = api.getChatsList(activeSession, page = conversationsNextPage, limit = conversationsPageSize)
+        val pageItems = response.firstArray("conversations", "chats", "data", "rows", "result")
+            ?: emptyArrayFrom(response)
+        val parsed = parseConversationRows(pageItems)
+        cacheConversations = parsed.distinctBy { it.id }
+        conversationsHasMore = parsed.size >= conversationsPageSize
+        conversationsNextPage = if (conversationsHasMore) 2 else 1
+        return cacheConversations
+    }
+
+    suspend fun loadMoreConversationsPage(): List<Conversation> {
+        val activeSession = session ?: return cacheConversations
+        if (!conversationsHasMore || conversationsLoading) return cacheConversations
+        conversationsLoading = true
+        try {
+            val response = api.getChatsList(activeSession, page = conversationsNextPage, limit = conversationsPageSize)
             val pageItems = response.firstArray("conversations", "chats", "data", "rows", "result")
                 ?: emptyArrayFrom(response)
             val parsed = parseConversationRows(pageItems)
-            if (parsed.isEmpty()) break
-            mapped += parsed
-            if (parsed.size < pageSize) break
-            page += 1
+            if (parsed.isEmpty()) {
+                conversationsHasMore = false
+                return cacheConversations
+            }
+            cacheConversations = (cacheConversations + parsed).distinctBy { it.id }
+            conversationsHasMore = parsed.size >= conversationsPageSize
+            if (conversationsHasMore) conversationsNextPage += 1
+            return cacheConversations
+        } finally {
+            conversationsLoading = false
         }
-        val deduped = mapped.distinctBy { it.id }
-        cacheConversations = deduped
-        return deduped
     }
 
     override suspend fun getMessages(conversationId: String): List<ChatMessage> {
-        val activeSession = session ?: return emptyList()
-        val contactId = conversationId.toLongOrNull() ?: return emptyList()
-        val items = loadAllMessageItems(activeSession, contactId)
-        val indices = if (shouldReverseMessageOrder(items)) {
-            (items.length() - 1 downTo 0).toList()
-        } else {
-            (0 until items.length()).toList()
-        }
-        val remoteMessages = buildList {
-            for (i in indices) {
-                val item = items.optJSONObject(i) ?: continue
-                val messageId = item.firstString("id", "message_id", "wamid") ?: "msg-$i"
-                val content = item.extractDisplayContent()
-                val messageTypeCode = item.firstInt("message_type")
-                val isNote = (item.firstInt("is_note") == 1) || item.firstString("type", "message_type") == "note"
-                val media = item.extractMediaPayload()
-                if (item.isSkippableEmptyOutgoing(content = content, media = media, messageTypeCode = messageTypeCode)) {
-                    continue
-                }
-                val messageType = when {
-                    isNote -> MessageType.NOTE
-                    media != null || messageTypeCode in setOf(2, 3, 4, 5, 6, 7) -> MessageType.IMAGE
-                    else -> MessageType.TEXT
-                }
-                val isAgent = item.firstBoolean("from_me", "is_agent", "agent")
-                    ?: (item.firstInt("is_message_by_contact") == 0)
-                    ?: (item.firstString("sender_type", "sender") in setOf("agent", "admin"))
-                add(
-                    ChatMessage(
-                        id = messageId,
-                        conversationId = conversationId,
-                        content = content,
-                        timestamp = item.firstString("created_at", "time", "timestamp")
-                            ?.let(::formatApiDateTime)
-                            .orEmpty(),
-                        type = messageType,
-                        sender = if (isAgent) MessageSender.AGENT else MessageSender.CUSTOMER,
-                        status = MessageDeliveryStatus.READ,
-                        noteAuthor = if (messageType == MessageType.NOTE) "You" else null,
-                        mediaUrl = media?.second,
-                        mediaKind = media?.first
-                    )
-                )
-            }
-        }
-        return remoteMessages
+        val state = messagePagingByConversation[conversationId]
+        if (state != null && state.loaded.isNotEmpty()) return state.loaded
+        return refreshMessagesFirstPage(conversationId)
     }
 
-    private suspend fun loadAllMessageItems(
-        session: SessionContext,
-        contactId: Long
-    ): JSONArray {
-        val collected = JSONArray()
-        var afterId = 0L
-        var pageCount = 0
-        val maxPages = 60
-        val pageSize = 150
+    suspend fun refreshMessagesFirstPage(conversationId: String, resetLoaded: Boolean = false): List<ChatMessage> {
+        val activeSession = session ?: return emptyList()
+        val contactId = conversationId.toLongOrNull() ?: return emptyList()
+        val existing = messagePagingByConversation[conversationId]
+        val pageSize = existing?.pageSize ?: 60
+        val response = api.getChatMessages(
+            activeSession,
+            contactId = contactId,
+            page = 1,
+            limit = pageSize
+        )
+        val pageItems = response.firstArray("messages", "data", "rows", "result") ?: emptyArrayFrom(response)
+        val parsed = parseMessageRows(conversationId, pageItems)
+        val previous = if (resetLoaded) emptyList() else existing?.loaded.orEmpty()
+        val merged = (previous + parsed).distinctBy { it.id }
+        messagePagingByConversation[conversationId] = MessagePagingState(
+            pageSize = pageSize,
+            nextPage = if (parsed.size >= pageSize) 2 else 1,
+            hasMore = parsed.size >= pageSize,
+            isLoading = false,
+            loaded = merged
+        )
+        return merged
+    }
 
-        while (pageCount < maxPages) {
-            val response = api.getChatMessages(session, contactId = contactId, afterId = afterId)
+    suspend fun loadOlderMessagesPage(conversationId: String): List<ChatMessage> {
+        val activeSession = session ?: return emptyList()
+        val contactId = conversationId.toLongOrNull() ?: return emptyList()
+        val state = messagePagingByConversation.getOrPut(conversationId) { MessagePagingState() }
+        if (!state.hasMore || state.isLoading) return state.loaded
+        state.isLoading = true
+        try {
+            val response = api.getChatMessages(
+                activeSession,
+                contactId = contactId,
+                page = state.nextPage,
+                limit = state.pageSize
+            )
             val pageItems = response.firstArray("messages", "data", "rows", "result") ?: emptyArrayFrom(response)
-            if (pageItems.length() == 0) break
-
-            var pageMaxId = afterId
-            for (i in 0 until pageItems.length()) {
-                val item = pageItems.optJSONObject(i) ?: continue
-                collected.put(item)
-                val messageId = item.firstLong("id", "message_id") ?: continue
-                if (messageId > pageMaxId) pageMaxId = messageId
+            val parsed = parseMessageRows(conversationId, pageItems)
+            if (parsed.isEmpty()) {
+                state.hasMore = false
+                return state.loaded
             }
-
-            if (pageMaxId <= afterId) break
-            afterId = pageMaxId
-            pageCount += 1
-            if (pageItems.length() < pageSize) break
+            state.loaded = (parsed + state.loaded).distinctBy { it.id }
+            state.hasMore = parsed.size >= state.pageSize
+            if (state.hasMore) state.nextPage += 1
+            return state.loaded
+        } finally {
+            state.isLoading = false
         }
-
-        return collected
     }
 
     override suspend fun appendMessage(message: ChatMessage) {
@@ -289,9 +304,114 @@ class NetworkChatRepository(
 
     fun restoreSession(token: String, companyId: Long) {
         session = SessionContext(token = token, companyId = companyId)
+        if (sessionWorkspaces.none { it.companyId == companyId }) {
+            sessionWorkspaces = listOf(
+                WorkspaceOption(companyId = companyId, name = "Workspace #$companyId")
+            )
+        }
     }
 
     fun currentUserSnapshot(): Pair<String?, String?> = sessionUserName to sessionUserEmail
+
+    fun availableWorkspacesSnapshot(): List<WorkspaceOption> = sessionWorkspaces
+
+    fun currentCompanyIdSnapshot(): Long? = session?.companyId
+
+    fun hasMoreConversationsSnapshot(): Boolean = conversationsHasMore
+
+    fun isLoadingMoreConversationsSnapshot(): Boolean = conversationsLoading
+
+    fun hasMoreMessagesSnapshot(conversationId: String): Boolean =
+        messagePagingByConversation[conversationId]?.hasMore ?: false
+
+    fun isLoadingMoreMessagesSnapshot(conversationId: String): Boolean =
+        messagePagingByConversation[conversationId]?.isLoading ?: false
+
+    fun switchWorkspace(companyId: Long): Boolean {
+        val active = session ?: return false
+        if (companyId <= 0L || active.companyId == companyId) return false
+        session = active.copy(companyId = companyId)
+        cacheConversations = emptyList()
+        cacheContactsById = emptyMap()
+        messagePagingByConversation.clear()
+        conversationsNextPage = 1
+        conversationsHasMore = true
+        conversationsLoading = false
+        return true
+    }
+}
+
+private fun parseMessageRows(conversationId: String, items: JSONArray): List<ChatMessage> {
+    val indices = if (shouldReverseMessageOrder(items)) {
+        (items.length() - 1 downTo 0).toList()
+    } else {
+        (0 until items.length()).toList()
+    }
+    return buildList {
+        for (i in indices) {
+            val item = items.optJSONObject(i) ?: continue
+            val messageId = item.firstString("id", "message_id", "wamid") ?: "msg-$i"
+            val content = item.extractDisplayContent()
+            val messageTypeCode = item.firstInt("message_type")
+            val isNote = (item.firstInt("is_note") == 1) || item.firstString("type", "message_type") == "note"
+            val media = item.extractMediaPayload()
+            if (item.isSkippableEmptyOutgoing(content = content, media = media, messageTypeCode = messageTypeCode)) {
+                continue
+            }
+            val messageType = when {
+                isNote -> MessageType.NOTE
+                media != null || messageTypeCode in setOf(2, 3, 4, 5, 6, 7) -> MessageType.IMAGE
+                else -> MessageType.TEXT
+            }
+            val isAgent = item.firstBoolean("from_me", "is_agent", "agent")
+                ?: (item.firstInt("is_message_by_contact") == 0)
+                ?: (item.firstString("sender_type", "sender") in setOf("agent", "admin"))
+            add(
+                ChatMessage(
+                    id = messageId,
+                    conversationId = conversationId,
+                    content = content,
+                    timestamp = item.firstString("created_at", "time", "timestamp")
+                        ?.let(::formatApiDateTime)
+                        .orEmpty(),
+                    type = messageType,
+                    sender = if (isAgent) MessageSender.AGENT else MessageSender.CUSTOMER,
+                    status = MessageDeliveryStatus.READ,
+                    noteAuthor = if (messageType == MessageType.NOTE) "You" else null,
+                    mediaUrl = media?.second,
+                    mediaKind = media?.first
+                )
+            )
+        }
+    }
+}
+
+private fun parseWorkspaceOptions(response: JSONObject, fallbackCompanyId: Long): List<WorkspaceOption> {
+    val result = buildList {
+        fun addWorkspace(item: JSONObject?) {
+            val id = item?.firstLong("company_id", "id") ?: return
+            if (id <= 0L) return
+            val name = item.firstString("name", "company_name", "title")
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+                ?: "Workspace #$id"
+            add(WorkspaceOption(companyId = id, name = name))
+        }
+
+        val top = response.firstArray("companies")
+        if (top != null) {
+            for (i in 0 until top.length()) addWorkspace(top.optJSONObject(i))
+        }
+        val nested = response.firstObject("data")?.firstArray("companies")
+        if (nested != null) {
+            for (i in 0 until nested.length()) addWorkspace(nested.optJSONObject(i))
+        }
+        val merchantCompany = response.firstObject("data", "user", "merchant", "company")
+        addWorkspace(merchantCompany)
+    }.distinctBy { it.companyId }
+
+    if (result.isNotEmpty()) return result
+    return listOf(WorkspaceOption(companyId = fallbackCompanyId, name = "Workspace #$fallbackCompanyId"))
 }
 
 private fun parseConversationRows(items: JSONArray): List<Conversation> = buildList {

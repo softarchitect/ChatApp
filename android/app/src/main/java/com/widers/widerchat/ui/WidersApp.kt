@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -42,6 +43,8 @@ import com.widers.widerchat.core.TextKey
 import com.widers.widerchat.core.tr
 import com.widers.widerchat.data.local.SecureSessionStore
 import com.widers.widerchat.data.local.StoredSession
+import com.widers.widerchat.data.notifications.NotificationNavigationBridge
+import com.widers.widerchat.data.notifications.NotificationTokenBridge
 import com.widers.widerchat.domain.model.AppLocale
 import com.widers.widerchat.domain.model.AppScreen
 import com.widers.widerchat.ui.screens.ChatScreen
@@ -56,6 +59,8 @@ import com.widers.widerchat.ui.theme.WiderChatTheme
 @Composable
 fun WidersApp(viewModel: AppViewModel = viewModel()) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val pendingChatId by NotificationNavigationBridge.targetChatId.collectAsStateWithLifecycle()
+    val pushToken by NotificationTokenBridge.token.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val secureSessionStore = remember { SecureSessionStore(context) }
     var attemptedAutoLogin by remember { mutableStateOf(false) }
@@ -77,7 +82,7 @@ fun WidersApp(viewModel: AppViewModel = viewModel()) {
         }
     }
 
-    LaunchedEffect(state.isLoggedIn) {
+    LaunchedEffect(state.isLoggedIn, state.currentCompanyId, state.profileName, state.profileEmail) {
         if (state.isLoggedIn) {
             viewModel.sessionSnapshot()?.let { (token, companyId) ->
                 secureSessionStore.save(
@@ -89,6 +94,20 @@ fun WidersApp(viewModel: AppViewModel = viewModel()) {
                     )
                 )
             }
+        }
+    }
+
+    LaunchedEffect(pushToken) {
+        if (!pushToken.isNullOrBlank()) {
+            viewModel.onPushTokenReceived(pushToken!!)
+        }
+    }
+
+    LaunchedEffect(state.isLoggedIn, pendingChatId) {
+        val chatId = pendingChatId ?: return@LaunchedEffect
+        if (state.isLoggedIn) {
+            viewModel.onNotificationOpenChat(chatId)
+            NotificationNavigationBridge.clearTarget()
         }
     }
 
@@ -135,6 +154,9 @@ fun WidersApp(viewModel: AppViewModel = viewModel()) {
                         onOpenChat = viewModel::openChat,
                         onSearchChats = viewModel::searchChats,
                         onRefreshConversations = viewModel::refreshConversationsList,
+                        onLoadMoreConversations = viewModel::loadMoreConversations,
+                        hasMoreConversations = state.hasMoreConversations,
+                        isLoadingMoreConversations = state.isLoadingMoreConversations,
                         onLoadContacts = viewModel::loadContactsForNewConversation,
                         onSearchContacts = viewModel::searchContactsForNewConversation,
                         onStartConversationForContact = viewModel::startConversationForContact,
@@ -185,6 +207,9 @@ fun WidersApp(viewModel: AppViewModel = viewModel()) {
                         onSyncCustomField = viewModel::syncCurrentContactCustomField,
                         onUpdateContact = viewModel::updateCurrentContact,
                         onDeleteChat = viewModel::deleteCurrentChat,
+                        onLoadOlderMessages = viewModel::loadOlderMessagesForActiveChat,
+                        hasMoreOlderMessages = state.hasMoreActiveMessages,
+                        isLoadingOlderMessages = state.isLoadingMoreActiveMessages,
                         isHistoryLoading = state.isChatLoading,
                         actionStatus = state.actionStatus
                     )
@@ -195,8 +220,11 @@ fun WidersApp(viewModel: AppViewModel = viewModel()) {
                         darkMode = state.darkMode,
                         profileName = state.profileName,
                         profileEmail = state.profileEmail,
+                        currentCompanyId = state.currentCompanyId,
+                        availableWorkspaces = state.availableWorkspaces,
                         onLocaleChange = viewModel::setLocale,
                         onDarkModeChange = viewModel::setDarkMode,
+                        onSwitchWorkspace = viewModel::switchWorkspace,
                         onOpenPrivacy = { viewModel.setScreen(AppScreen.PRIVACY) },
                         onOpenTerms = { viewModel.setScreen(AppScreen.TERMS) },
                         onOpenVersion = { viewModel.setScreen(AppScreen.VERSION) },
@@ -243,7 +271,12 @@ private fun BottomNav(
     locale: AppLocale,
     onScreenSelected: (AppScreen) -> Unit
 ) {
-    Column(modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface)
+            .navigationBarsPadding()
+    ) {
         HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
         Row(
             modifier = Modifier

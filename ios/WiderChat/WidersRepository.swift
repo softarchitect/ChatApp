@@ -7,6 +7,19 @@ final class WidersRepository: ChatRepository {
     private var contactPhonesById: [String: String] = [:]
     private var sessionUserName: String?
     private var sessionUserEmail: String?
+    private var sessionWorkspaces: [WorkspaceOption] = []
+    private var conversationsNextPage: Int = 1
+    private var conversationsHasMore: Bool = true
+    private let conversationsPageSize: Int = 30
+    private var conversationsLoading: Bool = false
+    private struct MessagePagingState {
+        var pageSize: Int = 60
+        var nextPage: Int = 1
+        var hasMore: Bool = true
+        var isLoading: Bool = false
+        var loaded: [ChatMessage] = []
+    }
+    private var messagePagingByConversation: [String: MessagePagingState] = [:]
 
     func login(email: String, password: String) async -> Bool {
         do {
@@ -24,6 +37,7 @@ final class WidersRepository: ChatRepository {
                 return false
             }
             session = APISession(token: token, companyId: companyId)
+            sessionWorkspaces = parseWorkspaceOptions(response: response, fallbackCompanyId: companyId)
             let data = response["data"] as? [String: Any]
             let user = response["user"] as? [String: Any]
                 ?? data?["user"] as? [String: Any]
@@ -43,122 +57,120 @@ final class WidersRepository: ChatRepository {
     }
 
     func getConversations() async -> [Conversation] {
+        if !conversationsCache.isEmpty { return conversationsCache }
+        return await refreshConversationsFirstPage()
+    }
+
+    func refreshConversationsFirstPage() async -> [Conversation] {
         guard let session else { return [] }
+        conversationsNextPage = 1
+        conversationsHasMore = true
+        conversationsCache = []
         do {
-            var page = 1
-            let pageSize = 30
-            let maxPages = 120
-            var allMapped: [Conversation] = []
-            while page <= maxPages {
-                let response = try await api.getChatsList(session: session, page: page, limit: pageSize)
-                let rows = response.firstArray(keys: ["conversations", "chats", "data", "rows", "result"])
-                let mapped: [Conversation] = rows.compactMap { item in
-                    guard let id = item.firstString(keys: ["contact_id", "id", "conversation_id"]) else { return nil }
-                    let statusRaw = (item["chats_status"] as? [String: Any])?.firstInt(keys: ["is_open"]) == 0 ? "closed" : (item.firstString(keys: ["status"]) ?? "open")
-                    let assignedAgentName = (item["agent"] as? [String: Any])?.firstString(keys: ["name", "full_name", "username"])
-                    let tags = parseConversationTags(item)
-                    let rawLastTime = item.firstString(keys: ["updated_at", "last_reply_at", "last_message_time", "created_at", "time"]) ?? ""
-                    let satisfaction = parseConversationSatisfaction(item)
-                    return Conversation(
-                        id: id,
-                        customerName: item.firstString(keys: ["name", "customer_name", "contact_name", "title"]) ?? "Customer",
-                        customerPhone: item.firstString(keys: ["phone", "contact_phone", "wa_id", "number"]) ?? "",
-                        lastMessage: sanitizeConversationPreview(item.firstString(keys: ["last_message", "last_value", "value", "text", "body"]) ?? ""),
-                        lastMessageTime: formatApiDateTime(rawLastTime),
-                        lastMessageEpochMs: parseApiEpochMs(rawLastTime),
-                        satisfaction: satisfaction,
-                        unreadCount: {
-                            let rawUnread = item.firstInt(keys: ["unread_messages", "unread_count", "unread"]) ?? 0
-                            let isReaded = (item["chats_status"] as? [String: Any])?.firstBool(keys: ["is_readed"]) ?? item.firstBool(keys: ["is_readed"])
-                            if isReaded == true { return 0 }
-                            if isReaded == false { return rawUnread > 0 ? rawUnread : 1 }
-                            return rawUnread
-                        }(),
-                        status: statusRaw == "closed" ? .closed : .open,
-                        isOnline: item.firstBool(keys: ["is_online", "online"]) ?? false,
-                        assignedAgentName: assignedAgentName,
-                        tags: tags
-                    )
-                }
-                if mapped.isEmpty { break }
-                allMapped.append(contentsOf: mapped)
-                if mapped.count < pageSize { break }
-                page += 1
+            let response = try await api.getChatsList(session: session, page: conversationsNextPage, limit: conversationsPageSize)
+            let rows = response.firstArray(keys: ["conversations", "chats", "data", "rows", "result"])
+            let mapped = mapConversations(rows)
+            conversationsCache = mapped
+            conversationsHasMore = mapped.count >= conversationsPageSize
+            conversationsNextPage = conversationsHasMore ? 2 : 1
+            return conversationsCache
+        } catch {
+            conversationsHasMore = false
+            return conversationsCache
+        }
+    }
+
+    func loadMoreConversationsPage() async -> [Conversation] {
+        guard let session else { return conversationsCache }
+        if !conversationsHasMore || conversationsLoading { return conversationsCache }
+        conversationsLoading = true
+        defer { conversationsLoading = false }
+        do {
+            let response = try await api.getChatsList(session: session, page: conversationsNextPage, limit: conversationsPageSize)
+            let rows = response.firstArray(keys: ["conversations", "chats", "data", "rows", "result"])
+            let mapped = mapConversations(rows)
+            if mapped.isEmpty {
+                conversationsHasMore = false
+                return conversationsCache
             }
             var seen = Set<String>()
-            let deduped = allMapped.filter { seen.insert($0.id).inserted }
-            conversationsCache = deduped
-            return deduped
+            conversationsCache = (conversationsCache + mapped).filter { seen.insert($0.id).inserted }
+            conversationsHasMore = mapped.count >= conversationsPageSize
+            if conversationsHasMore { conversationsNextPage += 1 }
+            return conversationsCache
         } catch {
-            return []
+            return conversationsCache
         }
     }
 
     func getMessages(conversationId: String) async -> [ChatMessage] {
+        if let state = messagePagingByConversation[conversationId], !state.loaded.isEmpty {
+            return state.loaded
+        }
+        return await refreshMessagesFirstPage(conversationId: conversationId, resetLoaded: false)
+    }
+
+    func refreshMessagesFirstPage(conversationId: String, resetLoaded: Bool) async -> [ChatMessage] {
         guard let session, let contactId = Int(conversationId) else { return [] }
+        let existing = messagePagingByConversation[conversationId]
+        let pageSize = existing?.pageSize ?? 60
         do {
-            var rows = try await loadAllMessageRows(session: session, contactId: contactId)
-            if shouldReverseMessageOrder(rows) {
-                rows.reverse()
-            }
-            let remoteMessages = rows.enumerated().compactMap { index, item -> ChatMessage? in
-                let kind = item.firstString(keys: ["type", "message_type"]) ?? "text"
-                let messageTypeCode = item.firstInt(keys: ["message_type"]) ?? 1
-                let isNote = (item.firstInt(keys: ["is_note"]) ?? 0) == 1 || kind == "note"
-                let media = item.extractMediaPayload()
-                let content = item.extractDisplayContent()
-                if item.isSkippableEmptyOutgoing(content: content, media: media, messageTypeCode: messageTypeCode) {
-                    return nil
-                }
-                let isAgent: Bool = {
-                    if let explicit = item.firstBool(keys: ["from_me", "is_agent", "agent"]) {
-                        return explicit
-                    }
-                    if let contactFlag = item.firstInt(keys: ["is_message_by_contact"]) {
-                        return contactFlag == 0
-                    }
-                    return item.firstString(keys: ["sender", "sender_type"]) == "agent"
-                }()
-                return ChatMessage(
-                    id: item.firstString(keys: ["id", "message_id", "wamid"]) ?? "msg-\(index)",
-                    conversationId: conversationId,
-                    content: content,
-                    timestamp: formatApiDateTime(item.firstString(keys: ["created_at", "time", "timestamp"]) ?? ""),
-                    type: isNote ? .note : (media != nil || messageTypeCode != 1 ? .media : .text),
-                    sender: isAgent ? .agent : .customer,
-                    status: .read,
-                    noteAuthor: isNote ? "You" : nil,
-                    mediaUrl: media?.1,
-                    mediaKind: media?.0
-                )
-            }
-            return remoteMessages
+            let response = try await api.getChatMessages(
+                session: session,
+                contactId: contactId,
+                page: 1,
+                limit: pageSize
+            )
+            let rows = response.firstArray(keys: ["messages", "data", "rows", "result"])
+            let parsed = parseMessageRows(conversationId: conversationId, rows: rows)
+            let previous = resetLoaded ? [] : (existing?.loaded ?? [])
+            let merged = dedupeMessages(previous + parsed)
+            messagePagingByConversation[conversationId] = MessagePagingState(
+                pageSize: pageSize,
+                nextPage: parsed.count >= pageSize ? 2 : 1,
+                hasMore: parsed.count >= pageSize,
+                isLoading: false,
+                loaded: merged
+            )
+            return merged
         } catch {
-            return []
+            return existing?.loaded ?? []
         }
     }
 
-    private func loadAllMessageRows(session: APISession, contactId: Int) async throws -> [[String: Any]] {
-        var allRows: [[String: Any]] = []
-        var afterId = 0
-        var pageCount = 0
-        let maxPages = 60
-        let pageSize = 150
-
-        while pageCount < maxPages {
-            let response = try await api.getChatMessages(session: session, contactId: contactId, afterId: afterId)
-            let page = response.firstArray(keys: ["messages", "data", "rows", "result"])
-            if page.isEmpty { break }
-            allRows.append(contentsOf: page)
-
-            let pageMaxId = page.compactMap { $0.firstInt(keys: ["id", "message_id"]) }.max() ?? afterId
-            if pageMaxId <= afterId { break }
-            afterId = pageMaxId
-            pageCount += 1
-            if page.count < pageSize { break }
+    func loadOlderMessagesPage(conversationId: String) async -> [ChatMessage] {
+        guard let session, let contactId = Int(conversationId) else { return [] }
+        var state = messagePagingByConversation[conversationId] ?? MessagePagingState()
+        if !state.hasMore || state.isLoading { return state.loaded }
+        state.isLoading = true
+        messagePagingByConversation[conversationId] = state
+        defer {
+            var latest = messagePagingByConversation[conversationId] ?? state
+            latest.isLoading = false
+            messagePagingByConversation[conversationId] = latest
         }
-
-        return allRows
+        do {
+            let response = try await api.getChatMessages(
+                session: session,
+                contactId: contactId,
+                page: state.nextPage,
+                limit: state.pageSize
+            )
+            let rows = response.firstArray(keys: ["messages", "data", "rows", "result"])
+            let parsed = parseMessageRows(conversationId: conversationId, rows: rows)
+            if parsed.isEmpty {
+                state.hasMore = false
+                messagePagingByConversation[conversationId] = state
+                return state.loaded
+            }
+            state.loaded = dedupeMessages(parsed + state.loaded)
+            state.hasMore = parsed.count >= state.pageSize
+            if state.hasMore { state.nextPage += 1 }
+            messagePagingByConversation[conversationId] = state
+            return state.loaded
+        } catch {
+            return messagePagingByConversation[conversationId]?.loaded ?? []
+        }
     }
 
     func sendMessage(conversationId: String, text: String) async -> Bool {
@@ -279,12 +291,161 @@ final class WidersRepository: ChatRepository {
     func restoreSession(token: String, companyId: Int) {
         guard !token.isEmpty, companyId > 0 else { return }
         session = APISession(token: token, companyId: companyId)
+        if !sessionWorkspaces.contains(where: { $0.companyId == companyId }) {
+            sessionWorkspaces = [WorkspaceOption(companyId: companyId, name: "Workspace #\(companyId)")]
+        }
     }
 
     func clearSession() {
         session = nil
+        sessionWorkspaces = []
+        conversationsCache = []
+        contactPhonesById = [:]
+        messagePagingByConversation = [:]
+        conversationsNextPage = 1
+        conversationsHasMore = false
+        conversationsLoading = false
     }
 
+    func availableWorkspacesSnapshot() -> [WorkspaceOption] {
+        sessionWorkspaces
+    }
+
+    func currentCompanyIdSnapshot() -> Int? {
+        session?.companyId
+    }
+
+    func switchWorkspace(companyId: Int) -> Bool {
+        guard let current = session, companyId > 0, current.companyId != companyId else { return false }
+        session = APISession(token: current.token, companyId: companyId)
+        conversationsCache = []
+        contactPhonesById = [:]
+        messagePagingByConversation = [:]
+        conversationsNextPage = 1
+        conversationsHasMore = true
+        conversationsLoading = false
+        return true
+    }
+
+    func hasMoreConversationsSnapshot() -> Bool {
+        conversationsHasMore
+    }
+
+    func isLoadingMoreConversationsSnapshot() -> Bool {
+        conversationsLoading
+    }
+
+    func hasMoreMessagesSnapshot(conversationId: String) -> Bool {
+        messagePagingByConversation[conversationId]?.hasMore ?? false
+    }
+
+    func isLoadingMoreMessagesSnapshot(conversationId: String) -> Bool {
+        messagePagingByConversation[conversationId]?.isLoading ?? false
+    }
+
+}
+
+private func mapConversations(_ rows: [[String: Any]]) -> [Conversation] {
+    let mapped: [Conversation] = rows.compactMap { item in
+        guard let id = item.firstString(keys: ["contact_id", "id", "conversation_id"]) else { return nil }
+        let statusRaw = (item["chats_status"] as? [String: Any])?.firstInt(keys: ["is_open"]) == 0 ? "closed" : (item.firstString(keys: ["status"]) ?? "open")
+        let assignedAgentName = (item["agent"] as? [String: Any])?.firstString(keys: ["name", "full_name", "username"])
+        let tags = parseConversationTags(item)
+        let rawLastTime = item.firstString(keys: ["updated_at", "last_reply_at", "last_message_time", "created_at", "time"]) ?? ""
+        let satisfaction = parseConversationSatisfaction(item)
+        return Conversation(
+            id: id,
+            customerName: item.firstString(keys: ["name", "customer_name", "contact_name", "title"]) ?? "Customer",
+            customerPhone: item.firstString(keys: ["phone", "contact_phone", "wa_id", "number"]) ?? "",
+            lastMessage: sanitizeConversationPreview(item.firstString(keys: ["last_message", "last_value", "value", "text", "body"]) ?? ""),
+            lastMessageTime: formatApiDateTime(rawLastTime),
+            lastMessageEpochMs: parseApiEpochMs(rawLastTime),
+            satisfaction: satisfaction,
+            unreadCount: {
+                let rawUnread = item.firstInt(keys: ["unread_messages", "unread_count", "unread"]) ?? 0
+                let isReaded = (item["chats_status"] as? [String: Any])?.firstBool(keys: ["is_readed"]) ?? item.firstBool(keys: ["is_readed"])
+                if isReaded == true { return 0 }
+                if isReaded == false { return rawUnread > 0 ? rawUnread : 1 }
+                return rawUnread
+            }(),
+            status: statusRaw == "closed" ? .closed : .open,
+            isOnline: item.firstBool(keys: ["is_online", "online"]) ?? false,
+            assignedAgentName: assignedAgentName,
+            tags: tags
+        )
+    }
+    var seen = Set<String>()
+    return mapped.filter { seen.insert($0.id).inserted }
+}
+
+private func parseMessageRows(conversationId: String, rows: [[String: Any]]) -> [ChatMessage] {
+    var normalizedRows = rows
+    if shouldReverseMessageOrder(normalizedRows) {
+        normalizedRows.reverse()
+    }
+    let mapped = normalizedRows.enumerated().compactMap { index, item -> ChatMessage? in
+        let kind = item.firstString(keys: ["type", "message_type"]) ?? "text"
+        let messageTypeCode = item.firstInt(keys: ["message_type"]) ?? 1
+        let isNote = (item.firstInt(keys: ["is_note"]) ?? 0) == 1 || kind == "note"
+        let media = item.extractMediaPayload()
+        let content = item.extractDisplayContent()
+        if item.isSkippableEmptyOutgoing(content: content, media: media, messageTypeCode: messageTypeCode) {
+            return nil
+        }
+        let isAgent: Bool = {
+            if let explicit = item.firstBool(keys: ["from_me", "is_agent", "agent"]) {
+                return explicit
+            }
+            if let contactFlag = item.firstInt(keys: ["is_message_by_contact"]) {
+                return contactFlag == 0
+            }
+            return item.firstString(keys: ["sender", "sender_type"]) == "agent"
+        }()
+        return ChatMessage(
+            id: item.firstString(keys: ["id", "message_id", "wamid"]) ?? "msg-\(index)",
+            conversationId: conversationId,
+            content: content,
+            timestamp: formatApiDateTime(item.firstString(keys: ["created_at", "time", "timestamp"]) ?? ""),
+            type: isNote ? .note : (media != nil || messageTypeCode != 1 ? .media : .text),
+            sender: isAgent ? .agent : .customer,
+            status: .read,
+            noteAuthor: isNote ? "You" : nil,
+            mediaUrl: media?.1,
+            mediaKind: media?.0
+        )
+    }
+    return dedupeMessages(mapped)
+}
+
+private func dedupeMessages(_ items: [ChatMessage]) -> [ChatMessage] {
+    var seen = Set<String>()
+    return items.filter { seen.insert($0.id).inserted }
+}
+
+private func parseWorkspaceOptions(response: [String: Any], fallbackCompanyId: Int) -> [WorkspaceOption] {
+    var result: [WorkspaceOption] = []
+    func addWorkspace(_ item: [String: Any]?) {
+        guard let item else { return }
+        guard let id = item.firstInt(keys: ["company_id", "id"]), id > 0 else { return }
+        let name = (item.firstString(keys: ["name", "company_name", "title"]) ?? "Workspace #\(id)")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedName = name.isEmpty ? "Workspace #\(id)" : name
+        if !result.contains(where: { $0.companyId == id }) {
+            result.append(WorkspaceOption(companyId: id, name: resolvedName))
+        }
+    }
+
+    (response["companies"] as? [[String: Any]])?.forEach { addWorkspace($0) }
+    if let data = response["data"] as? [String: Any] {
+        (data["companies"] as? [[String: Any]])?.forEach { addWorkspace($0) }
+        if let merchant = (data["user"] as? [String: Any])?["merchant"] as? [String: Any] {
+            addWorkspace(merchant["company"] as? [String: Any])
+        }
+    }
+    if result.isEmpty {
+        result = [WorkspaceOption(companyId: fallbackCompanyId, name: "Workspace #\(fallbackCompanyId)")]
+    }
+    return result
 }
 
 private func shouldReverseMessageOrder(_ rows: [[String: Any]]) -> Bool {

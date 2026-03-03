@@ -98,6 +98,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -190,6 +191,9 @@ fun ChatScreen(
     onSyncCustomField: (String, String) -> Unit,
     onUpdateContact: (String, String, String?) -> Unit,
     onDeleteChat: () -> Unit,
+    onLoadOlderMessages: () -> Unit,
+    hasMoreOlderMessages: Boolean,
+    isLoadingOlderMessages: Boolean,
     isHistoryLoading: Boolean,
     actionStatus: String?
 ) {
@@ -732,6 +736,20 @@ fun ChatScreen(
                     }
                 }
             } else {
+                if (isLoadingOlderMessages) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 6.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            if (locale == AppLocale.AR) "جارٍ تحميل الرسائل الأقدم..." else "Loading older messages...",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
@@ -1095,6 +1113,14 @@ fun ChatScreen(
     }
     LaunchedEffect(isNearBottom) {
         if (isNearBottom) pendingNewMessages = 0
+    }
+    LaunchedEffect(listState, hasMoreOlderMessages, isLoadingOlderMessages, messages.size) {
+        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
+            .collect { (index, offset) ->
+                if (hasMoreOlderMessages && !isLoadingOlderMessages && messages.isNotEmpty() && index <= 1 && offset == 0) {
+                    onLoadOlderMessages()
+                }
+            }
     }
     LaunchedEffect(templateSearch) {
         if (templateSearch.isBlank()) {

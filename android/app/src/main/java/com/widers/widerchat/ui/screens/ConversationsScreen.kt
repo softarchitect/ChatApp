@@ -109,6 +109,9 @@ fun ConversationsScreen(
     onOpenChat: (String) -> Unit,
     onSearchChats: (String) -> Unit,
     onRefreshConversations: () -> Unit,
+    onLoadMoreConversations: () -> Unit,
+    hasMoreConversations: Boolean,
+    isLoadingMoreConversations: Boolean,
     onLoadContacts: () -> Unit,
     onSearchContacts: (String) -> Unit,
     onStartConversationForContact: (NewConversationContact) -> Unit,
@@ -651,6 +654,31 @@ fun ConversationsScreen(
                             }
                             LaunchedEffect(visibleConversationCount, filtered.size) {
                                 visibleConversationCount = (visibleConversationCount + 30).coerceAtMost(filtered.size)
+                            }
+                        }
+                    }
+                    if (visibleConversationCount >= filtered.size && hasMoreConversations) {
+                        item(key = "load-more-conversations-server") {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 12.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    if (locale == AppLocale.AR) {
+                                        if (isLoadingMoreConversations) "جارٍ تحميل المزيد..." else "تحميل المزيد..."
+                                    } else {
+                                        if (isLoadingMoreConversations) "Loading more..." else "Load more..."
+                                    },
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            LaunchedEffect(hasMoreConversations, isLoadingMoreConversations, filtered.size) {
+                                if (hasMoreConversations && !isLoadingMoreConversations) {
+                                    onLoadMoreConversations()
+                                }
                             }
                         }
                     }

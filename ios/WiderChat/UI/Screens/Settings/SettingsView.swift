@@ -5,6 +5,7 @@ struct SettingsView: View {
     @State private var pushEnabled = true
     @State private var soundEnabled = true
     @State private var showingLanguageDialog = false
+    @State private var showingWorkspaceDialog = false
     @State private var showingLogoutAlert = false
     @State private var showTagDialog = false
     @State private var showReplyDialog = false
@@ -66,6 +67,16 @@ struct SettingsView: View {
                     settingsTitle(tr(vm.locale, .account).uppercased())
                     flatGroup {
                         flatRow(icon: "person.fill", iconBg: Color(red: 0.23, green: 0.51, blue: 0.96), label: tr(vm.locale, .profile), value: nil, onTap: {})
+                        if vm.availableWorkspaces.count > 1 {
+                            sectionDivider()
+                            flatRow(
+                                icon: "building.2.fill",
+                                iconBg: Color(red: 0.02, green: 0.64, blue: 0.91),
+                                label: vm.locale == .ar ? "مساحة العمل" : "Workspace",
+                                value: vm.availableWorkspaces.first(where: { $0.companyId == vm.currentCompanyId })?.name,
+                                onTap: { showingWorkspaceDialog = true }
+                            )
+                        }
                     }
 
                     Spacer().frame(height: 8)
@@ -150,6 +161,22 @@ struct SettingsView: View {
         .confirmationDialog(tr(vm.locale, .language), isPresented: $showingLanguageDialog, titleVisibility: .visible) {
             Button(tr(vm.locale, .english)) { vm.locale = .en }
             Button(tr(vm.locale, .arabic)) { vm.locale = .ar }
+            Button(tr(vm.locale, .cancel), role: .cancel) {}
+        }
+        .confirmationDialog(
+            vm.locale == .ar ? "تبديل مساحة العمل" : "Switch workspace",
+            isPresented: $showingWorkspaceDialog,
+            titleVisibility: .visible
+        ) {
+            ForEach(vm.availableWorkspaces) { workspace in
+                let isCurrent = workspace.companyId == vm.currentCompanyId
+                Button((isCurrent ? "✓ " : "") + workspace.name) {
+                    if !isCurrent {
+                        vm.switchWorkspace(companyId: workspace.companyId)
+                    }
+                }
+                .disabled(isCurrent)
+            }
             Button(tr(vm.locale, .cancel), role: .cancel) {}
         }
         .alert(tr(vm.locale, .createUpdateTag), isPresented: $showTagDialog) {
