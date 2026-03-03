@@ -1,5 +1,6 @@
 import Foundation
 
+@MainActor
 final class PusherRealtimeClient {
     private let key: String
     private let cluster: String
@@ -61,7 +62,7 @@ final class PusherRealtimeClient {
 
     private func startListening() {
         listenTask?.cancel()
-        listenTask = Task.detached { [weak self] in
+        listenTask = Task { [weak self] in
             guard let self else { return }
             while !Task.isCancelled {
                 guard let socketTask = self.socketTask else { return }
@@ -87,7 +88,7 @@ final class PusherRealtimeClient {
 
     private func startPinging() {
         pingTask?.cancel()
-        pingTask = Task.detached { [weak self] in
+        pingTask = Task { [weak self] in
             guard let self else { return }
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 25_000_000_000)
@@ -146,7 +147,7 @@ final class PusherRealtimeClient {
             let jsonData = try? JSONSerialization.data(withJSONObject: ["event": event, "data": data]),
             let text = String(data: jsonData, encoding: .utf8)
         else { return }
-        Task.detached {
+        Task {
             try? await socketTask.send(.string(text))
         }
     }
@@ -154,7 +155,7 @@ final class PusherRealtimeClient {
 
 private extension URLSessionWebSocketTask {
     func sendPingAsync() async throws {
-        try await withCheckedThrowingContinuation { continuation in
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             self.sendPing { error in
                 if let error {
                     continuation.resume(throwing: error)
