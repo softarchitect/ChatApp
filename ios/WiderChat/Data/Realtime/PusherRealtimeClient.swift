@@ -144,11 +144,11 @@ final class PusherRealtimeClient {
     private func send(event: String, data: [String: Any]) {
         guard let socketTask else { return }
         guard
-            let jsonData = try? JSONSerialization.data(withJSONObject: ["event": event, "data": data]),
-            let text = String(data: jsonData, encoding: .utf8)
+            let payloadData = try? JSONSerialization.data(withJSONObject: ["event": event, "data": data]),
+            let payloadText = String(data: payloadData, encoding: .utf8)
         else { return }
         Task {
-            try? await socketTask.send(.string(text))
+            try? await socketTask.send(.string(payloadText))
         }
     }
 }
