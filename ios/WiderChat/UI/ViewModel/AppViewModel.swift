@@ -890,12 +890,12 @@ final class AppViewModel: ObservableObject {
         Task { @MainActor in
             contactsLoading = true
             defer { contactsLoading = false }
-            let payload: [String: Any]? = {
-                if let repo = repository as? WidersRepository {
-                    return await repo.getContactsList(page: contactsNextPage, limit: contactsPageSize)
-                }
-                return await repository.getContactsList()
-            }()
+            let payload: [String: Any]?
+            if let repo = repository as? WidersRepository {
+                payload = await repo.getContactsList(page: contactsNextPage, limit: contactsPageSize)
+            } else {
+                payload = await repository.getContactsList()
+            }
             guard let payload else { return }
             let parsed = parseNewConversationContacts(payload)
             contactsHasMore = parsed.count >= contactsPageSize

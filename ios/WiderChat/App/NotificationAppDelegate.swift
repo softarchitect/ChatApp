@@ -37,7 +37,7 @@ final class NotificationAppDelegate: NSObject, UIApplicationDelegate, UNUserNoti
         didReceiveRemoteNotification userInfo: [AnyHashable: Any],
         fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
     ) {
-        if let contactId = extractContactId(from: userInfo) {
+        if let contactId = Self.extractContactId(from: userInfo) {
             Task { @MainActor in
                 PushNotificationBridge.postOpenChat(contactId: contactId)
             }
@@ -51,7 +51,7 @@ final class NotificationAppDelegate: NSObject, UIApplicationDelegate, UNUserNoti
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
         let userInfo = notification.request.content.userInfo
-        if let contactId = extractContactId(from: userInfo) {
+        if let contactId = Self.extractContactId(from: userInfo) {
             PushNotificationBridge.postOpenChat(contactId: contactId)
         }
         completionHandler([.banner, .sound, .badge])
@@ -63,7 +63,7 @@ final class NotificationAppDelegate: NSObject, UIApplicationDelegate, UNUserNoti
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         let userInfo = response.notification.request.content.userInfo
-        if let contactId = extractContactId(from: userInfo) {
+        if let contactId = Self.extractContactId(from: userInfo) {
             PushNotificationBridge.postOpenChat(contactId: contactId)
         }
         completionHandler()
@@ -83,7 +83,7 @@ final class NotificationAppDelegate: NSObject, UIApplicationDelegate, UNUserNoti
         PushNotificationBridge.postToken(token)
     }
 
-    private func extractContactId(from userInfo: [AnyHashable: Any]) -> String? {
+    private nonisolated static func extractContactId(from userInfo: [AnyHashable: Any]) -> String? {
         let keys = ["contact_id", "chat_id", "conversation_id", "chatId", "conversationId"]
         for key in keys {
             if let value = userInfo[key] as? String {
