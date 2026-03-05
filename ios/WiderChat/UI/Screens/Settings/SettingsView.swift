@@ -6,19 +6,25 @@ struct SettingsView: View {
     @State private var soundEnabled = true
     @State private var showingLanguageDialog = false
     @State private var showingWorkspaceDialog = false
+    @State private var showingProfileDialog = false
     @State private var showingLogoutAlert = false
     @State private var showTagDialog = false
     @State private var showReplyDialog = false
+    @State private var showTagPickerDialog = false
+    @State private var showReplyPickerDialog = false
     @State private var showContactDialog = false
     @State private var tagName = ""
     @State private var tagColor = "#ffffff"
-    @State private var tagId = ""
+    @State private var selectedTagId: Int?
     @State private var replyName = ""
     @State private var replyText = ""
-    @State private var replyId = ""
+    @State private var selectedReplyId: Int?
     @State private var contactName = ""
     @State private var contactPhone = ""
     @State private var contactEmail = ""
+    @State private var profileNameInput = ""
+    @State private var profileEmailInput = ""
+    @State private var tokenCopied = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -66,7 +72,11 @@ struct SettingsView: View {
                     Spacer().frame(height: 16)
                     settingsTitle(tr(vm.locale, .account).uppercased())
                     flatGroup {
-                        flatRow(icon: "person.fill", iconBg: Color(red: 0.23, green: 0.51, blue: 0.96), label: tr(vm.locale, .profile), value: nil, onTap: {})
+                        flatRow(icon: "person.fill", iconBg: Color(red: 0.23, green: 0.51, blue: 0.96), label: tr(vm.locale, .profile), value: nil, onTap: {
+                            profileNameInput = vm.profileName
+                            profileEmailInput = vm.profileEmail
+                            showingProfileDialog = true
+                        })
                         if vm.availableWorkspaces.count > 1 {
                             sectionDivider()
                             flatRow(
@@ -86,6 +96,40 @@ struct SettingsView: View {
                         sectionDivider()
                         flatToggleRow(icon: "speaker.wave.3.fill", iconBg: Color(red: 0.96, green: 0.62, blue: 0.04), label: tr(vm.locale, .soundAlerts), isOn: $soundEnabled)
                     }
+#if DEBUG
+                    if let info = vm.pushDebugInfo, !info.isEmpty {
+                        Text(info)
+                            .font(.system(size: 11))
+                            .foregroundStyle(AppPalette.textMuted)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 20)
+                            .padding(.top, 6)
+                        if let token = vm.pushDebugRawToken, !token.isEmpty {
+                            HStack(spacing: 8) {
+                                Button(vm.locale == .ar ? "نسخ الرمز" : "Copy token") {
+                                    UIPasteboard.general.string = token
+                                    tokenCopied = true
+                                    Task { @MainActor in
+                                        try? await Task.sleep(nanoseconds: 1_200_000_000)
+                                        tokenCopied = false
+                                    }
+                                }
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(AppPalette.primary)
+                                .buttonStyle(.plain)
+
+                                if tokenCopied {
+                                    Text(vm.locale == .ar ? "تم النسخ" : "Copied")
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundStyle(AppPalette.primary)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 20)
+                            .padding(.top, 4)
+                        }
+                    }
+#endif
 
                     Spacer().frame(height: 8)
                     settingsTitle(tr(vm.locale, .appearance).uppercased())
@@ -106,9 +150,15 @@ struct SettingsView: View {
                     flatGroup {
                         flatRow(icon: "arrow.clockwise.circle.fill", iconBg: Color(red: 0.02, green: 0.55, blue: 0.34), label: tr(vm.locale, .syncSupportData), value: nil, onTap: { vm.preloadSupportData() })
                         sectionDivider()
-                        flatRow(icon: "tag.fill", iconBg: Color(red: 0.40, green: 0.25, blue: 0.93), label: tr(vm.locale, .createUpdateTag), value: nil, onTap: { showTagDialog = true })
+                        flatRow(icon: "tag.fill", iconBg: Color(red: 0.40, green: 0.25, blue: 0.93), label: tr(vm.locale, .createUpdateTag), value: nil, onTap: {
+                            Task { await vm.refreshAvailableTags() }
+                            showTagDialog = true
+                        })
                         sectionDivider()
-                        flatRow(icon: "arrowshape.turn.up.left.fill", iconBg: Color(red: 0.01, green: 0.47, blue: 0.78), label: tr(vm.locale, .createUpdateReply), value: nil, onTap: { showReplyDialog = true })
+                        flatRow(icon: "arrowshape.turn.up.left.fill", iconBg: Color(red: 0.01, green: 0.47, blue: 0.78), label: tr(vm.locale, .createUpdateReply), value: nil, onTap: {
+                            Task { await vm.refreshAvailableReplies() }
+                            showReplyDialog = true
+                        })
                         sectionDivider()
                         flatRow(icon: "person.crop.circle.badge.plus", iconBg: Color(red: 0.96, green: 0.62, blue: 0.04), label: tr(vm.locale, .addContactTitle), value: nil, onTap: { showContactDialog = true })
                     }
@@ -179,27 +229,71 @@ struct SettingsView: View {
             }
             Button(tr(vm.locale, .cancel), role: .cancel) {}
         }
+        .alert(tr(vm.locale, .profile), isPresented: $showingProfileDialog) {
+            TextField(tr(vm.locale, .nameLabel), text: $profileNameInput)
+            TextField(tr(vm.locale, .emailLabel), text: $profileEmailInput)
+            Button(tr(vm.locale, .cancel), role: .cancel) {}
+            Button(tr(vm.locale, .save)) {
+                vm.updateProfile(name: profileNameInput, email: profileEmailInput)
+            }
+        }
         .alert(tr(vm.locale, .createUpdateTag), isPresented: $showTagDialog) {
             TextField(tr(vm.locale, .tagName), text: $tagName)
             TextField(tr(vm.locale, .tagColorHex), text: $tagColor)
-            TextField(tr(vm.locale, .tagIdOptional), text: $tagId)
             Button(tr(vm.locale, .cancel), role: .cancel) {}
+            Button(vm.locale == .ar ? "اختر من الوسوم الحالية" : "Select existing tag") {
+                showTagPickerDialog = true
+            }
             Button(tr(vm.locale, .save)) {
-                vm.createOrUpdateTag(name: tagName, color: tagColor, tagId: Int(tagId))
+                vm.createOrUpdateTag(name: tagName, color: tagColor, tagId: selectedTagId)
+                selectedTagId = nil
             }
         }
         .alert(tr(vm.locale, .createUpdateReply), isPresented: $showReplyDialog) {
             TextField(tr(vm.locale, .replyName), text: $replyName)
             TextField(tr(vm.locale, .replyText), text: $replyText)
-            TextField(tr(vm.locale, .replyIdOptional), text: $replyId)
             Button(tr(vm.locale, .cancel), role: .cancel) {}
-            Button(tr(vm.locale, .save)) {
-                vm.createOrUpdateReply(name: replyName, text: replyText, replyId: Int(replyId))
+            Button(vm.locale == .ar ? "اختر من الردود الحالية" : "Select existing quick reply") {
+                showReplyPickerDialog = true
             }
+            Button(tr(vm.locale, .save)) {
+                vm.createOrUpdateReply(name: replyName, text: replyText, replyId: selectedReplyId)
+                selectedReplyId = nil
+            }
+        }
+        .confirmationDialog(
+            vm.locale == .ar ? "اختيار وسم" : "Select tag",
+            isPresented: $showTagPickerDialog,
+            titleVisibility: .visible
+        ) {
+            ForEach(vm.availableTags) { tag in
+                Button("\(tag.name) (#\(tag.id))") {
+                    selectedTagId = tag.id
+                    tagName = tag.name
+                    tagColor = tag.colorHex ?? "#64748B"
+                    showTagDialog = true
+                }
+            }
+            Button(tr(vm.locale, .cancel), role: .cancel) {}
+        }
+        .confirmationDialog(
+            vm.locale == .ar ? "اختيار رد سريع" : "Select quick reply",
+            isPresented: $showReplyPickerDialog,
+            titleVisibility: .visible
+        ) {
+            ForEach(vm.availableReplies) { reply in
+                Button("\(reply.name) (#\(reply.id))") {
+                    selectedReplyId = reply.id
+                    replyName = reply.name
+                    replyText = reply.text
+                    showReplyDialog = true
+                }
+            }
+            Button(tr(vm.locale, .cancel), role: .cancel) {}
         }
         .alert(tr(vm.locale, .addContactTitle), isPresented: $showContactDialog) {
             TextField(tr(vm.locale, .nameLabel), text: $contactName)
-            TextField(tr(vm.locale, .phoneLabel), text: $contactPhone)
+            TextField("+96654377556", text: $contactPhone)
             TextField(tr(vm.locale, .emailOptional), text: $contactEmail)
             Button(tr(vm.locale, .cancel), role: .cancel) {}
             Button(tr(vm.locale, .add)) {

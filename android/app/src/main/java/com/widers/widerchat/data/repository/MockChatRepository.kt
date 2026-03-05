@@ -52,4 +52,6 @@ class MockChatRepository : ChatRepository {
         )
         appendMessage(message)
     }
+
+    override suspend fun registerPushToken(token: String, platform: String): Boolean = true
 }

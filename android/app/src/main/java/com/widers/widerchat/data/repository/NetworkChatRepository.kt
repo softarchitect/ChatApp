@@ -23,6 +23,15 @@ import java.util.TimeZone
 class NetworkChatRepository(
     private val api: WidersApiService = WidersApiService(BuildConfig.API_BASE_URL)
 ) : ChatRepository {
+    data class ConversationsRequestFilters(
+        val status: String = "all",
+        val tag: String = "all",
+        val agent: String = "all",
+        val rating: String = "all",
+        val tap: String = "all",
+        val orderBy: String = "default"
+    )
+
     private data class MessagePagingState(
         val pageSize: Int = 60,
         var nextPage: Int = 1,
@@ -41,6 +50,8 @@ class NetworkChatRepository(
     private var conversationsHasMore: Boolean = true
     private var conversationsPageSize: Int = 30
     private var conversationsLoading: Boolean = false
+    private var conversationsFilters: ConversationsRequestFilters = ConversationsRequestFilters()
+    private var latestRegisteredPushToken: String? = null
     private val messagePagingByConversation = mutableMapOf<String, MessagePagingState>()
 
     override suspend fun login(email: String, password: String): Boolean {
@@ -86,12 +97,25 @@ class NetworkChatRepository(
         return refreshConversationsFirstPage()
     }
 
-    suspend fun refreshConversationsFirstPage(): List<Conversation> {
+    suspend fun refreshConversationsFirstPage(
+        filters: ConversationsRequestFilters = ConversationsRequestFilters()
+    ): List<Conversation> {
         val activeSession = session ?: return emptyList()
+        conversationsFilters = filters
         conversationsNextPage = 1
         conversationsHasMore = true
         cacheConversations = emptyList()
-        val response = api.getChatsList(activeSession, page = conversationsNextPage, limit = conversationsPageSize)
+        val response = api.getChatsList(
+            activeSession,
+            page = conversationsNextPage,
+            limit = conversationsPageSize,
+            status = conversationsFilters.status,
+            tag = conversationsFilters.tag,
+            agent = conversationsFilters.agent,
+            rating = conversationsFilters.rating,
+            tap = conversationsFilters.tap,
+            orderBy = conversationsFilters.orderBy
+        )
         val pageItems = response.firstArray("conversations", "chats", "data", "rows", "result")
             ?: emptyArrayFrom(response)
         val parsed = parseConversationRows(pageItems)
@@ -101,12 +125,28 @@ class NetworkChatRepository(
         return cacheConversations
     }
 
-    suspend fun loadMoreConversationsPage(): List<Conversation> {
+    suspend fun loadMoreConversationsPage(
+        filters: ConversationsRequestFilters? = null
+    ): List<Conversation> {
         val activeSession = session ?: return cacheConversations
+        val activeFilters = filters ?: conversationsFilters
+        if (filters != null) {
+            conversationsFilters = filters
+        }
         if (!conversationsHasMore || conversationsLoading) return cacheConversations
         conversationsLoading = true
         try {
-            val response = api.getChatsList(activeSession, page = conversationsNextPage, limit = conversationsPageSize)
+            val response = api.getChatsList(
+                activeSession,
+                page = conversationsNextPage,
+                limit = conversationsPageSize,
+                status = activeFilters.status,
+                tag = activeFilters.tag,
+                agent = activeFilters.agent,
+                rating = activeFilters.rating,
+                tap = activeFilters.tap,
+                orderBy = activeFilters.orderBy
+            )
             val pageItems = response.firstArray("conversations", "chats", "data", "rows", "result")
                 ?: emptyArrayFrom(response)
             val parsed = parseConversationRows(pageItems)
@@ -114,8 +154,11 @@ class NetworkChatRepository(
                 conversationsHasMore = false
                 return cacheConversations
             }
-            cacheConversations = (cacheConversations + parsed).distinctBy { it.id }
-            conversationsHasMore = parsed.size >= conversationsPageSize
+            val previousSize = cacheConversations.size
+            val merged = (cacheConversations + parsed).distinctBy { it.id }
+            val addedCount = merged.size - previousSize
+            cacheConversations = merged
+            conversationsHasMore = addedCount > 0 && parsed.size >= conversationsPageSize
             if (conversationsHasMore) conversationsNextPage += 1
             return cacheConversations
         } finally {
@@ -231,32 +274,54 @@ class NetworkChatRepository(
         api.addNote(activeSession, contactId, note)
     }
 
-    // Full endpoint coverage from Postman collection.
-    suspend fun getContacts(): JSONObject? {
-        val activeSession = session ?: return null
-        val merged = JSONArray()
-        var page = 1
-        val pageSize = 25
-        val maxPages = 120
-        while (page <= maxPages) {
-            val payload = api.getContactsList(activeSession, page = page, limit = pageSize)
-            val contacts = payload.firstArray("contacts", "data", "rows", "result") ?: JSONArray()
-            if (contacts.length() == 0) break
-            for (i in 0 until contacts.length()) {
-                merged.put(contacts.optJSONObject(i) ?: continue)
-            }
-            if (contacts.length() < pageSize) break
-            page += 1
+    override suspend fun registerPushToken(token: String, platform: String): Boolean {
+        val activeSession = session ?: return false
+        val normalized = token.trim()
+        if (normalized.isBlank()) return false
+        if (latestRegisteredPushToken == normalized) return true
+        return try {
+            api.registerPushToken(
+                session = activeSession,
+                pushToken = normalized
+            )
+            latestRegisteredPushToken = normalized
+            true
+        } catch (_: Exception) {
+            false
         }
-        val cache = mutableMapOf<String, String>()
-        for (i in 0 until merged.length()) {
-            val item = merged.optJSONObject(i) ?: continue
+    }
+
+    // Full endpoint coverage from Postman collection.
+    suspend fun getContactsPage(page: Int, limit: Int = 25): JSONObject? {
+        val activeSession = session ?: return null
+        val payload = api.getContactsList(activeSession, page = page, limit = limit)
+        val rows = payload.firstArray("contacts", "data", "rows", "result") ?: JSONArray()
+        if (rows.length() > 0) {
+            val cache = cacheContactsById.toMutableMap()
+            for (i in 0 until rows.length()) {
+                val item = rows.optJSONObject(i) ?: continue
+                val id = item.firstString("id", "contact_id") ?: continue
+                val phone = item.firstString("phone", "wa_id", "number") ?: continue
+                if (phone.isNotBlank()) cache[id] = phone
+            }
+            cacheContactsById = cache
+        }
+        return payload
+    }
+
+    // Backward-compatible helper used by sync actions.
+    suspend fun getContacts(): JSONObject? {
+        val payload = getContactsPage(page = 1, limit = 25) ?: return null
+        val rows = payload.firstArray("contacts", "data", "rows", "result") ?: JSONArray()
+        val cache = cacheContactsById.toMutableMap()
+        for (i in 0 until rows.length()) {
+            val item = rows.optJSONObject(i) ?: continue
             val id = item.firstString("id", "contact_id") ?: continue
             val phone = item.firstString("phone", "wa_id", "number") ?: continue
             if (phone.isNotBlank()) cache[id] = phone
         }
         cacheContactsById = cache
-        return JSONObject().put("contacts", merged)
+        return JSONObject().put("contacts", rows)
     }
     suspend fun getTemplates() = session?.let(api::getTemplatesList)
     suspend fun getTags() = session?.let(api::getTagsList)
@@ -282,6 +347,16 @@ class NetworkChatRepository(
     suspend fun attachTag(contactId: Long, tagId: Long) = session?.let { api.attachTagToChat(it, contactId, tagId) }
     suspend fun detachTag(contactId: Long, tagId: Long) = session?.let { api.detachTagFromChat(it, contactId, tagId) }
     suspend fun searchChats(keyword: String, page: Int, limit: Int) = session?.let { api.searchChats(it, keyword, page, limit) }
+    suspend fun searchConversations(keyword: String, page: Int = 1, limit: Int = 50): List<Conversation> {
+        val payload = searchChats(keyword, page, limit) ?: return emptyList()
+        val searchRows = payload.firstArray("search")
+        if (searchRows != null && searchRows.length() > 0) {
+            return parseSearchRows(searchRows)
+        }
+        val rows = payload.firstArray("conversations", "chats", "data", "rows", "result")
+            ?: emptyArrayFrom(payload)
+        return parseConversationRows(rows)
+    }
     suspend fun sendTemplate(contactId: Long, templateId: Long) = session?.let { api.sendTemplateMessage(it, contactId, templateId) }
     suspend fun sendFlow(contactId: Long, flowId: Long) = session?.let { api.sendFlow(it, contactId, flowId) }
     suspend fun assignAgent(contactId: Long, agent: Long) = session?.let { api.assignAgent(it, contactId, agent) }
@@ -337,6 +412,7 @@ class NetworkChatRepository(
         conversationsNextPage = 1
         conversationsHasMore = true
         conversationsLoading = false
+        latestRegisteredPushToken = null
         return true
     }
 }
@@ -354,11 +430,20 @@ private fun parseMessageRows(conversationId: String, items: JSONArray): List<Cha
             val content = item.extractDisplayContent()
             val messageTypeCode = item.firstInt("message_type")
             val isNote = (item.firstInt("is_note") == 1) || item.firstString("type", "message_type") == "note"
+            val isSystem = item.firstBoolean("is_system", "system") == true ||
+                item.firstString("type", "message_type", "sender_type", "event_type")
+                    ?.trim()
+                    ?.lowercase(Locale.US)
+                    ?.let { value ->
+                        value == "system" || value == "activity" || value == "event" ||
+                            value == "timeline" || value == "audit"
+                    } == true
             val media = item.extractMediaPayload()
             if (item.isSkippableEmptyOutgoing(content = content, media = media, messageTypeCode = messageTypeCode)) {
                 continue
             }
             val messageType = when {
+                isSystem -> MessageType.SYSTEM
                 isNote -> MessageType.NOTE
                 media != null || messageTypeCode in setOf(2, 3, 4, 5, 6, 7) -> MessageType.IMAGE
                 else -> MessageType.TEXT
@@ -375,7 +460,11 @@ private fun parseMessageRows(conversationId: String, items: JSONArray): List<Cha
                         ?.let(::formatApiDateTime)
                         .orEmpty(),
                     type = messageType,
-                    sender = if (isAgent) MessageSender.AGENT else MessageSender.CUSTOMER,
+                    sender = when {
+                        messageType == MessageType.SYSTEM -> MessageSender.AGENT
+                        isAgent -> MessageSender.AGENT
+                        else -> MessageSender.CUSTOMER
+                    },
                     status = MessageDeliveryStatus.READ,
                     noteAuthor = if (messageType == MessageType.NOTE) "You" else null,
                     mediaUrl = media?.second,
@@ -441,6 +530,13 @@ private fun parseConversationRows(items: JSONArray): List<Conversation> = buildL
             ?.firstString("name", "full_name", "username")
         val tags = parseConversationTags(item)
         val satisfaction = parseConversationSatisfaction(item)
+        val isWindowExpired = item.firstBoolean(
+            "is_window_expired",
+            "window_expired",
+            "is_24h_expired",
+            "expired_24h",
+            "meta_window_expired"
+        ) ?: false
 
         add(
             Conversation(
@@ -452,6 +548,7 @@ private fun parseConversationRows(items: JSONArray): List<Conversation> = buildL
                 lastMessageEpochMs = lastMessageEpochMs,
                 unreadCount = unreadCount,
                 status = if (isOpen) ConversationStatus.OPEN else ConversationStatus.CLOSED,
+                isWindowExpired = isWindowExpired,
                 isOnline = item.firstBoolean("is_online", "online") ?: false,
                 assignedAgentName = agentName,
                 tags = tags,
@@ -462,6 +559,8 @@ private fun parseConversationRows(items: JSONArray): List<Conversation> = buildL
 }
 
 private fun parseConversationSatisfaction(item: JSONObject): ConversationSatisfaction {
+    val lastRatingRaw = item.optJSONObject("last_rating")?.firstString("rating", "status", "label", "name")
+        ?: item.optJSONObject("last_rating_data")?.firstString("rating", "status", "label", "name")
     val top = item.firstString(
         "satisfaction",
         "satisfaction_status",
@@ -472,7 +571,18 @@ private fun parseConversationSatisfaction(item: JSONObject): ConversationSatisfa
     )
     val nested = item.optJSONObject("rating")?.firstString("status", "label", "name")
         ?: item.optJSONObject("satisfaction")?.firstString("status", "label", "name")
-    val raw = (nested ?: top).orEmpty().trim().lowercase(Locale.US)
+    val numeric = item.optJSONObject("rating")?.firstInt("value", "score", "rating")
+        ?: item.optJSONObject("satisfaction")?.firstInt("value", "score", "rating")
+        ?: item.firstInt("rating", "rating_value").takeIf { it != 0 }
+    if (numeric != null) {
+        return when {
+            numeric >= 4 -> ConversationSatisfaction.SATISFIED
+            numeric == 3 -> ConversationSatisfaction.NEUTRAL
+            numeric in 1..2 -> ConversationSatisfaction.UNSATISFIED
+            else -> ConversationSatisfaction.NO_RATING
+        }
+    }
+    val raw = (lastRatingRaw ?: nested ?: top).orEmpty().trim().lowercase(Locale.US)
     if (raw.isBlank() || raw == "all" || raw == "none" || raw == "null") {
         return ConversationSatisfaction.NO_RATING
     }
@@ -602,6 +712,7 @@ private fun formatApiDateTime(raw: String): String {
     val value = raw.trim()
     if (value.isEmpty()) return raw
     val output = SimpleDateFormat("h:mm a", Locale.US)
+    output.timeZone = TimeZone.getTimeZone("Asia/Riyadh")
     val inputPatterns = listOf(
         "yyyy-MM-dd'T'HH:mm:ss.SSSSSS'Z'",
         "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
@@ -648,17 +759,20 @@ private fun JSONObject.extractDisplayContent(): String {
     firstString("value", "text", "body", "message", "caption", "original_message", "last_message", "note")
         ?.takeIf { it.isNotBlank() }
         ?.let { return it }
+    firstString("action", "event", "activity", "title", "description")
+        ?.takeIf { it.isNotBlank() }
+        ?.let { return it }
 
     val audio = firstString("header_audio")
-    if (!audio.isNullOrBlank()) return "[Audio message]"
+    if (audio.isMeaningfulMediaValue()) return "[Audio message]"
     val image = firstString("header_image")
-    if (!image.isNullOrBlank()) return "[Image]"
+    if (image.isMeaningfulMediaValue()) return "[Image]"
     val video = firstString("header_video")
-    if (!video.isNullOrBlank()) return "[Video]"
+    if (video.isMeaningfulMediaValue()) return "[Video]"
     val document = firstString("header_document")
-    if (!document.isNullOrBlank()) return "[Document]"
+    if (document.isMeaningfulMediaValue()) return "[Document]"
     val location = firstString("header_location")
-    if (!location.isNullOrBlank()) return "[Location]"
+    if (location.isMeaningfulMediaValue()) return "[Location]"
 
     val buttonsRaw = firstString("buttons")
     if (!buttonsRaw.isNullOrBlank() && buttonsRaw != "[]") return "[Interactive message]"
@@ -670,15 +784,15 @@ private fun JSONObject.extractDisplayContent(): String {
 
 private fun JSONObject.extractMediaPayload(): Pair<String, String>? {
     val audio = firstString("header_audio")
-    if (!audio.isNullOrBlank()) return "audio" to audio
+    if (audio.isMeaningfulMediaValue()) return "audio" to audio!!
     val image = firstString("header_image")
-    if (!image.isNullOrBlank()) return "image" to image
+    if (image.isMeaningfulMediaValue()) return "image" to image!!
     val video = firstString("header_video")
-    if (!video.isNullOrBlank()) return "video" to video
+    if (video.isMeaningfulMediaValue()) return "video" to video!!
     val document = firstString("header_document")
-    if (!document.isNullOrBlank()) return "document" to document
+    if (document.isMeaningfulMediaValue()) return "document" to document!!
     val location = firstString("header_location")
-    if (!location.isNullOrBlank()) return "location" to location
+    if (location.isMeaningfulMediaValue()) return "location" to location!!
     return null
 }
 
@@ -709,10 +823,21 @@ private fun shouldReverseMessageOrder(items: JSONArray): Boolean {
     val firstTs = first.firstString("created_at", "timestamp", "time")
     val lastTs = last.firstString("created_at", "timestamp", "time")
     if (!firstTs.isNullOrBlank() && !lastTs.isNullOrBlank()) {
-        return firstTs > lastTs
+        val firstEpoch = parseApiEpochMillis(firstTs)
+        val lastEpoch = parseApiEpochMillis(lastTs)
+        if (firstEpoch > 0L && lastEpoch > 0L) {
+            return firstEpoch > lastEpoch
+        }
     }
 
     return false
+}
+
+private fun String?.isMeaningfulMediaValue(): Boolean {
+    val value = this?.trim().orEmpty()
+    if (value.isBlank()) return false
+    val lowered = value.lowercase(Locale.US)
+    return lowered != "null" && lowered != "[]" && lowered != "{}"
 }
 
 private fun sanitizeConversationPreview(raw: String): String {
@@ -731,4 +856,38 @@ private fun sanitizeConversationPreview(raw: String): String {
         else -> "Media"
     }
 }
+
+private fun parseSearchRows(items: JSONArray): List<Conversation> = buildList {
+    for (i in 0 until items.length()) {
+        val item = items.optJSONObject(i) ?: continue
+        val nestedContact = item.optJSONObject("contact")
+        val id = nestedContact?.firstString("id", "contact_id")
+            ?: item.firstString("contact_id", "conversation_id", "id")
+            ?: continue
+        val name = nestedContact?.firstString("name")
+            ?: item.firstString("name", "text", "title")
+            ?: "Customer"
+        val phone = nestedContact?.firstString("phone")
+            ?: item.firstString("phone", "wa_id", "number")
+            ?: ""
+        val text = item.firstString("text", "message", "value").orEmpty()
+        add(
+            Conversation(
+                id = id,
+                customerName = name,
+                customerPhone = phone,
+                lastMessage = sanitizeConversationPreview(text),
+                lastMessageTime = "",
+                lastMessageEpochMs = 0L,
+                unreadCount = 0,
+                status = ConversationStatus.OPEN,
+                isWindowExpired = false,
+                isOnline = false,
+                assignedAgentName = null,
+                tags = emptyList(),
+                satisfaction = ConversationSatisfaction.NO_RATING
+            )
+        )
+    }
+}.distinctBy { it.id }
 

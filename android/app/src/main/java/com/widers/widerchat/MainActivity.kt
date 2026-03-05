@@ -39,7 +39,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun consumeLaunchIntent(intent: Intent?) {
-        val chatId = intent?.getStringExtra(WiderFirebaseMessagingService.EXTRA_CHAT_ID)
+        val chatId = intent?.getStringExtra(WiderFirebaseMessagingService.EXTRA_CONTACT_ID)
         NotificationNavigationBridge.pushTarget(chatId)
     }
 

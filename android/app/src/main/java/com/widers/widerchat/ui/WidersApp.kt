@@ -151,6 +151,7 @@ fun WidersApp(viewModel: AppViewModel = viewModel()) {
                         contacts = state.newConversationContacts,
                         contactsLoading = state.contactsLoading,
                         availableTags = state.availableTags,
+                        availableAgents = state.availableAgents,
                         onOpenChat = viewModel::openChat,
                         onSearchChats = viewModel::searchChats,
                         onRefreshConversations = viewModel::refreshConversationsList,
@@ -158,6 +159,9 @@ fun WidersApp(viewModel: AppViewModel = viewModel()) {
                         hasMoreConversations = state.hasMoreConversations,
                         isLoadingMoreConversations = state.isLoadingMoreConversations,
                         onLoadContacts = viewModel::loadContactsForNewConversation,
+                        onLoadMoreContacts = viewModel::loadMoreContactsForNewConversation,
+                        hasMoreContacts = state.hasMoreNewConversationContacts,
+                        isLoadingMoreContacts = state.isLoadingMoreNewConversationContacts,
                         onSearchContacts = viewModel::searchContactsForNewConversation,
                         onStartConversationForContact = viewModel::startConversationForContact,
                         onStartNewConversation = viewModel::startNewConversation,
@@ -232,10 +236,15 @@ fun WidersApp(viewModel: AppViewModel = viewModel()) {
                             secureSessionStore.clear()
                             viewModel.logout()
                         },
+                        onUpdateProfile = viewModel::updateProfile,
                         onSyncSupportData = viewModel::preloadSupportData,
                         onCreateTag = viewModel::createOrUpdateTag,
                         onCreateReply = viewModel::createOrUpdateReply,
+                        availableTags = state.availableTags,
+                        availableReplies = state.availableReplies,
                         onAddContact = viewModel::addContact,
+                        pushDebugInfo = state.pushDebugInfo,
+                        pushDebugRawToken = state.pushDebugRawToken,
                         actionStatus = state.actionStatus
                     )
 

@@ -481,11 +481,13 @@ fun ChatScreen(
                             variant = SatisfactionBadgeVariant.REGULAR
                         )
                     }
-                    Text(
-                        if (conversation.isOnline) tr(locale, TextKey.ONLINE) else "${tr(locale, TextKey.LAST_SEEN)} ${conversation.lastMessageTime}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    if (conversation.isOnline) {
+                        Text(
+                            tr(locale, TextKey.ONLINE),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
             Box {
@@ -635,6 +637,25 @@ fun ChatScreen(
                 contentAlignment = Alignment.Center
             ) {
                 Text(tr(locale, TextKey.CONVERSATION_CLOSED), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        if (conversation.isWindowExpired) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFFEF4444))
+                    .padding(vertical = 6.dp, horizontal = 10.dp),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                Text(
+                    if (locale == AppLocale.AR) {
+                        "انتهت نافذة 24 ساعة. يجب إرسال قالب."
+                    } else {
+                        "24-hour window expired. You must send a template."
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White
+                )
             }
         }
         if (!actionStatus.isNullOrBlank()) {
@@ -1641,7 +1662,13 @@ fun ChatScreen(
                         value = updateContactPhone,
                         onValueChange = { updateContactPhone = it },
                         singleLine = true,
-                        label = { Text(tr(locale, TextKey.PHONE_LABEL)) }
+                        label = { Text(tr(locale, TextKey.PHONE_LABEL)) },
+                        placeholder = { Text("+96654377556") },
+                        supportingText = {
+                            Text(
+                                if (locale == AppLocale.AR) "صيغة دولية بدون مسافات" else "International format, no spaces"
+                            )
+                        }
                     )
                     OutlinedTextField(
                         value = updateContactEmail,
@@ -1705,9 +1732,7 @@ fun ChatScreen(
                                     .fillMaxWidth()
                                     .clickable {
                                         customFieldId = field.id
-                                        if (customFieldValue.isBlank()) {
-                                            customFieldValue = field.value.orEmpty()
-                                        }
+                                        customFieldValue = field.value.orEmpty()
                                     }
                                     .padding(vertical = 8.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1715,20 +1740,16 @@ fun ChatScreen(
                             ) {
                                 Text(field.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text(
-                                    "#${field.id}",
+                                    field.value.orEmpty(),
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
                         }
                     }
-                    OutlinedTextField(
-                        value = customFieldId,
-                        onValueChange = { customFieldId = it },
-                        singleLine = true,
-                        label = { Text(tr(locale, TextKey.FIELD_ID)) }
-                    )
                     OutlinedTextField(
                         value = customFieldValue,
                         onValueChange = { customFieldValue = it },
@@ -1784,7 +1805,7 @@ fun ChatScreen(
                     }
                     Spacer(Modifier.size(12.dp))
                     Text(
-                        if (conversation.isOnline) tr(locale, TextKey.ONLINE) else "${tr(locale, TextKey.LAST_SEEN)} ${conversation.lastMessageTime}",
+                        if (conversation.isOnline) tr(locale, TextKey.ONLINE) else "-",
                         style = MaterialTheme.typography.bodyMedium
                     )
                     Spacer(Modifier.size(4.dp))
@@ -2133,6 +2154,41 @@ private fun MessageBubble(msg: ChatMessage, darkMode: Boolean) {
     var fullImageUrl by remember(msg.id) { mutableStateOf<String?>(null) }
     var previewDocumentUrl by remember(msg.id) { mutableStateOf<String?>(null) }
     var previewVideoUrl by remember(msg.id) { mutableStateOf<String?>(null) }
+    if (msg.type == MessageType.SYSTEM) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            ElevatedCard(
+                modifier = Modifier.widthIn(max = 360.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.elevatedCardColors(
+                    containerColor = if (darkMode) Color(0xFF2E3338) else Color(0xFFE5E7EB)
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        msg.content,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (darkMode) Color(0xFFE5E7EB) else Color(0xFF374151)
+                    )
+                    if (msg.timestamp.isNotBlank()) {
+                        Text(
+                            msg.timestamp,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (darkMode) Color(0xFF9CA3AF) else Color(0xFF6B7280)
+                        )
+                    }
+                }
+            }
+        }
+        return
+    }
     if (msg.type == MessageType.NOTE) {
         Box(
             modifier = Modifier

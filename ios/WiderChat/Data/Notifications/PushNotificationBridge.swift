@@ -4,10 +4,10 @@ enum PushNotificationBridge {
     static let didOpenChat = Notification.Name("PushNotificationBridge.didOpenChat")
     static let tokenUpdated = Notification.Name("PushNotificationBridge.tokenUpdated")
 
-    static func postOpenChat(chatId: String) {
-        let normalized = chatId.trimmingCharacters(in: .whitespacesAndNewlines)
+    static func postOpenChat(contactId: String) {
+        let normalized = contactId.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { return }
-        NotificationCenter.default.post(name: didOpenChat, object: nil, userInfo: ["chat_id": normalized])
+        NotificationCenter.default.post(name: didOpenChat, object: nil, userInfo: ["contact_id": normalized])
     }
 
     static func postToken(_ token: String) {
@@ -17,7 +17,7 @@ enum PushNotificationBridge {
     }
 
     static func extractChatId(from userInfo: [AnyHashable: Any]) -> String? {
-        let keys = ["chat_id", "conversation_id", "contact_id", "chatId", "conversationId"]
+        let keys = ["contact_id", "chat_id", "conversation_id", "chatId", "conversationId"]
         for key in keys {
             if let value = userInfo[key] as? String {
                 let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)

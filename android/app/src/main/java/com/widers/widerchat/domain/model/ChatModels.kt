@@ -30,7 +30,8 @@ enum class ConversationSatisfaction {
 enum class MessageType {
     TEXT,
     IMAGE,
-    NOTE
+    NOTE,
+    SYSTEM
 }
 
 enum class MessageSender {
@@ -54,6 +55,7 @@ data class Conversation(
     val lastMessageTime: String,
     val unreadCount: Int,
     val status: ConversationStatus,
+    val isWindowExpired: Boolean = false,
     val isOnline: Boolean,
     val assignedAgentName: String? = null,
     val tags: List<ConversationTag> = emptyList(),

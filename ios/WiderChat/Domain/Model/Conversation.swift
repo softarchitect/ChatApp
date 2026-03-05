@@ -10,6 +10,7 @@ struct Conversation: Identifiable {
     var satisfaction: ConversationSatisfaction
     var unreadCount: Int
     var status: ConversationStatus
+    var isWindowExpired: Bool
     let isOnline: Bool
     let assignedAgentName: String?
     let tags: [ConversationTag]
@@ -24,6 +25,7 @@ struct Conversation: Identifiable {
         satisfaction: ConversationSatisfaction = .noRating,
         unreadCount: Int,
         status: ConversationStatus,
+        isWindowExpired: Bool = false,
         isOnline: Bool,
         assignedAgentName: String? = nil,
         tags: [ConversationTag] = []
@@ -37,6 +39,7 @@ struct Conversation: Identifiable {
         self.satisfaction = satisfaction
         self.unreadCount = unreadCount
         self.status = status
+        self.isWindowExpired = isWindowExpired
         self.isOnline = isOnline
         self.assignedAgentName = assignedAgentName
         self.tags = tags

@@ -238,6 +238,22 @@ class WidersApiService(
                 .put("email", email ?: "")
         )
 
+    fun registerPushToken(
+        session: SessionContext,
+        pushToken: String
+    ): JSONObject {
+        val normalizedToken = pushToken.trim()
+        if (normalizedToken.isBlank()) {
+            throw IllegalArgumentException("Push token is blank")
+        }
+        return postJson(
+            "/api/wpbox/fcm/store-token",
+            JSONObject()
+                .put("token", session.token)
+                .put("fcm_token", normalizedToken)
+        )
+    }
+
     fun createOrUpdateTag(
         session: SessionContext,
         name: String,

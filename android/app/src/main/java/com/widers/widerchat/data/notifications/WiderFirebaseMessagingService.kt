@@ -16,18 +16,18 @@ import kotlin.random.Random
 
 class WiderFirebaseMessagingService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
-        val chatId = extractChatId(message.data)
-        if (!chatId.isNullOrBlank()) {
-            NotificationNavigationBridge.pushTarget(chatId)
+        val contactId = extractContactId(message.data)
+        if (!contactId.isNullOrBlank()) {
+            NotificationNavigationBridge.pushTarget(contactId)
         }
-        showNotification(message, chatId)
+        showNotification(message, contactId)
     }
 
     override fun onNewToken(token: String) {
         NotificationTokenBridge.setToken(token)
     }
 
-    private fun showNotification(message: RemoteMessage, chatId: String?) {
+    private fun showNotification(message: RemoteMessage, contactId: String?) {
         ensureChannel()
         val title = message.notification?.title
             ?: message.data["title"]
@@ -37,13 +37,13 @@ class WiderFirebaseMessagingService : FirebaseMessagingService() {
             ?: "You received a new chat update."
         val openIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            if (!chatId.isNullOrBlank()) {
-                putExtra(EXTRA_CHAT_ID, chatId)
+            if (!contactId.isNullOrBlank()) {
+                putExtra(EXTRA_CONTACT_ID, contactId)
             }
         }
         val pendingIntent = PendingIntent.getActivity(
             this,
-            chatId?.hashCode() ?: 0,
+            contactId?.hashCode() ?: 0,
             openIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
@@ -73,13 +73,13 @@ class WiderFirebaseMessagingService : FirebaseMessagingService() {
         manager.createNotificationChannel(channel)
     }
 
-    private fun extractChatId(data: Map<String, String>): String? {
-        val keys = listOf("chat_id", "conversation_id", "contact_id", "chatId", "conversationId")
+    private fun extractContactId(data: Map<String, String>): String? {
+        val keys = listOf("contact_id", "chat_id", "conversation_id", "chatId", "conversationId")
         return keys.firstNotNullOfOrNull { data[it]?.trim()?.takeIf(String::isNotEmpty) }
     }
 
     companion object {
         const val CHANNEL_ID = "wider_chat_updates"
-        const val EXTRA_CHAT_ID = "chat_id"
+        const val EXTRA_CONTACT_ID = "contact_id"
     }
 }

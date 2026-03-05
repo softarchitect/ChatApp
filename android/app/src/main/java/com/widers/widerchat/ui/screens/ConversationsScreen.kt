@@ -68,12 +68,14 @@ import androidx.compose.ui.unit.dp
 import com.widers.widerchat.core.TextKey
 import com.widers.widerchat.core.tr
 import com.widers.widerchat.domain.model.AvailableTag
+import com.widers.widerchat.domain.model.AvailableAgent
 import com.widers.widerchat.domain.model.AppLocale
 import com.widers.widerchat.domain.model.Conversation
 import com.widers.widerchat.domain.model.ConversationSatisfaction
 import com.widers.widerchat.domain.model.ConversationTag
 import com.widers.widerchat.domain.model.ConversationStatus
 import com.widers.widerchat.ui.components.SatisfactionBadge
+import com.widers.widerchat.ui.ConversationsServerFilters
 import com.widers.widerchat.ui.NewConversationContact
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
@@ -81,11 +83,7 @@ import java.util.Locale
 import java.util.TimeZone
 
 private enum class ReadFilter {
-    ALL, READ, UNREAD
-}
-
-private enum class AssignmentFilter {
-    ALL, MY, UNASSIGNED
+    ALL, OPEN, CLOSED, MUTED, READ, UNREAD
 }
 
 private enum class SatisfactionFilter {
@@ -106,13 +104,17 @@ fun ConversationsScreen(
     contacts: List<NewConversationContact>,
     contactsLoading: Boolean,
     availableTags: List<AvailableTag>,
+    availableAgents: List<AvailableAgent>,
     onOpenChat: (String) -> Unit,
     onSearchChats: (String) -> Unit,
-    onRefreshConversations: () -> Unit,
+    onRefreshConversations: (ConversationsServerFilters) -> Unit,
     onLoadMoreConversations: () -> Unit,
     hasMoreConversations: Boolean,
     isLoadingMoreConversations: Boolean,
     onLoadContacts: () -> Unit,
+    onLoadMoreContacts: () -> Unit,
+    hasMoreContacts: Boolean,
+    isLoadingMoreContacts: Boolean,
     onSearchContacts: (String) -> Unit,
     onStartConversationForContact: (NewConversationContact) -> Unit,
     onStartNewConversation: (String, String) -> Unit,
@@ -141,11 +143,8 @@ fun ConversationsScreen(
                 .getOrDefault(ReadFilter.ALL)
         )
     }
-    var assignmentFilter by remember {
-        mutableStateOf(
-            runCatching { AssignmentFilter.valueOf(prefs.getString("assignmentFilter", AssignmentFilter.ALL.name) ?: AssignmentFilter.ALL.name) }
-                .getOrDefault(AssignmentFilter.ALL)
-        )
+    var selectedAgentId by remember {
+        mutableStateOf(prefs.getLong("selectedAgentId", -1L).takeIf { it > 0 })
     }
     var satisfactionFilter by remember {
         mutableStateOf(
@@ -173,8 +172,6 @@ fun ConversationsScreen(
     var contactSearch by rememberSaveable { mutableStateOf("") }
     var tagPickerSearch by remember { mutableStateOf("") }
     var tagPickerSearchDebounced by remember { mutableStateOf("") }
-    var visibleConversationCount by rememberSaveable { mutableStateOf(30) }
-    var visibleContactCount by rememberSaveable { mutableStateOf(25) }
     var isPullRefreshing by remember { mutableStateOf(false) }
     val listState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
 
@@ -183,37 +180,44 @@ fun ConversationsScreen(
         tagPickerSearchDebounced = tagPickerSearch
     }
 
-    LaunchedEffect(search, tab, readFilter, assignmentFilter, satisfactionFilter, sortFilter, selectedTagId) {
+    LaunchedEffect(search, tab, readFilter, selectedAgentId, satisfactionFilter, sortFilter, selectedTagId) {
         prefs.edit()
             .putString("search", search)
             .putString("tab", tab)
             .putString("readFilter", readFilter.name)
-            .putString("assignmentFilter", assignmentFilter.name)
+            .putLong("selectedAgentId", selectedAgentId ?: -1L)
             .putString("satisfactionFilter", satisfactionFilter.name)
             .putString("sortFilter", sortFilter.name)
             .putLong("selectedTagId", selectedTagId ?: -1L)
             .apply()
     }
-    LaunchedEffect(conversations.size, actionStatus) {
-        if (isPullRefreshing) isPullRefreshing = false
+    LaunchedEffect(isPullRefreshing, conversations.size, hasMoreConversations, isLoadingMoreConversations, actionStatus) {
+        if (isPullRefreshing) {
+            // End refresh animation even when payload count is unchanged.
+            delay(350)
+            isPullRefreshing = false
+        }
     }
 
     val filteredBase = conversations.filter {
         val tabOk = when (tab) {
-            "open" -> it.status == ConversationStatus.OPEN
-            "closed" -> it.status == ConversationStatus.CLOSED
+            "my" -> it.assignedAgentName?.trim()?.equals(profileName.trim(), ignoreCase = true) == true
+            "unassigned" -> it.assignedAgentName.isNullOrBlank()
             else -> true
         }
         val readOk = when (readFilter) {
             ReadFilter.ALL -> true
+            ReadFilter.OPEN -> it.status == ConversationStatus.OPEN
+            ReadFilter.CLOSED -> it.status == ConversationStatus.CLOSED
+            ReadFilter.MUTED -> true
             ReadFilter.READ -> it.unreadCount == 0
             ReadFilter.UNREAD -> it.unreadCount > 0
         }
-        val assignmentOk = when (assignmentFilter) {
-            AssignmentFilter.ALL -> true
-            AssignmentFilter.MY -> it.assignedAgentName?.trim()?.equals(profileName.trim(), ignoreCase = true) == true
-            AssignmentFilter.UNASSIGNED -> it.assignedAgentName.isNullOrBlank()
-        }
+        val assignmentOk = selectedAgentId == null || availableAgents.firstOrNull { a -> a.id == selectedAgentId }
+            ?.name
+            ?.trim()
+            ?.let { agentName -> it.assignedAgentName?.trim()?.equals(agentName, ignoreCase = true) == true }
+            ?: false
         val satisfactionOk = when (satisfactionFilter) {
             SatisfactionFilter.ALL -> true
             SatisfactionFilter.SATISFIED -> it.satisfaction == ConversationSatisfaction.SATISFIED
@@ -232,14 +236,50 @@ fun ConversationsScreen(
     }
     val selectionMode = selectedConversationIds.isNotEmpty()
     val totalUnread = conversations.sumOf { it.unreadCount }
+    fun toServerFilters(): ConversationsServerFilters {
+        val status = when (readFilter) {
+            ReadFilter.OPEN -> "open"
+            ReadFilter.CLOSED -> "closed"
+            ReadFilter.MUTED -> "muted"
+            else -> "all"
+        }
+        val tap = when (readFilter) {
+            ReadFilter.READ -> "read"
+            ReadFilter.UNREAD -> "unread"
+            else -> "all"
+        }
+        val agent = when {
+            tab == "my" -> "mine"
+            tab == "unassigned" -> "unassigned"
+            selectedAgentId != null -> selectedAgentId.toString()
+            else -> "all"
+        }
+        val rating = when (satisfactionFilter) {
+            SatisfactionFilter.ALL -> "all"
+            SatisfactionFilter.SATISFIED -> "satisfied"
+            SatisfactionFilter.NEUTRAL -> "neutral"
+            SatisfactionFilter.UNSATISFIED -> "unsatisfied"
+            SatisfactionFilter.NO_RATING -> "no_rating"
+        }
+        val orderBy = when (sortFilter) {
+            SortFilter.LATEST -> "default"
+            SortFilter.CREATED_NEWEST -> "created_desc"
+            SortFilter.CREATED_OLDEST -> "created_asc"
+            SortFilter.UPDATED_NEWEST -> "updated_desc"
+            SortFilter.UPDATED_OLDEST -> "updated_asc"
+        }
+        return ConversationsServerFilters(
+            status = status,
+            tag = selectedTagId?.toString() ?: "all",
+            agent = agent,
+            rating = rating,
+            tap = tap,
+            orderBy = orderBy
+        )
+    }
 
-    LaunchedEffect(filtered.size) {
-        if (filtered.size < visibleConversationCount) {
-            visibleConversationCount = filtered.size.coerceAtLeast(30)
-        }
-        if (visibleConversationCount <= 0) {
-            visibleConversationCount = 30
-        }
+    LaunchedEffect(tab, readFilter, selectedAgentId, satisfactionFilter, sortFilter, selectedTagId) {
+        onRefreshConversations(toServerFilters())
     }
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -308,7 +348,6 @@ fun ConversationsScreen(
                             .clickable {
                                 showNewConversationDialog = true
                                 contactSearch = ""
-                                visibleContactCount = 25
                                 onLoadContacts()
                             },
                         contentAlignment = Alignment.Center
@@ -321,7 +360,7 @@ fun ConversationsScreen(
                             .size(40.dp)
                             .clip(CircleShape)
                             .background(MaterialTheme.colorScheme.secondary)
-                            .clickable { onRefreshConversations() },
+                            .clickable { onRefreshConversations(toServerFilters()) },
                         contentAlignment = Alignment.Center
                     ) {
                         Text(if (locale == AppLocale.AR) "↻" else "↻", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
@@ -363,8 +402,16 @@ fun ConversationsScreen(
                     modifier = Modifier.horizontalScroll(rememberScrollState())
                 ) {
                     TabChip(tr(locale, TextKey.ALL), conversations.size, tab == "all") { tab = "all" }
-                    TabChip(tr(locale, TextKey.OPEN), conversations.count { it.status == ConversationStatus.OPEN }, tab == "open") { tab = "open" }
-                    TabChip(tr(locale, TextKey.CLOSED), conversations.count { it.status == ConversationStatus.CLOSED }, tab == "closed") { tab = "closed" }
+                    TabChip(
+                        if (locale == AppLocale.AR) "محادثاتي" else "My conversations",
+                        conversations.count { it.assignedAgentName?.trim()?.equals(profileName.trim(), ignoreCase = true) == true },
+                        tab == "my"
+                    ) { tab = "my" }
+                    TabChip(
+                        if (locale == AppLocale.AR) "غير معين" else "Unassigned",
+                        conversations.count { it.assignedAgentName.isNullOrBlank() },
+                        tab == "unassigned"
+                    ) { tab = "unassigned" }
                 }
                 Spacer(Modifier.height(8.dp))
                 Row(
@@ -375,12 +422,18 @@ fun ConversationsScreen(
                         label = if (locale == AppLocale.AR) {
                             when (readFilter) {
                                 ReadFilter.ALL -> "القراءة: الكل"
+                                ReadFilter.OPEN -> "الحالة: مفتوح"
+                                ReadFilter.CLOSED -> "الحالة: مغلق"
+                                ReadFilter.MUTED -> "الحالة: مكتوم"
                                 ReadFilter.READ -> "القراءة: مقروء"
                                 ReadFilter.UNREAD -> "القراءة: غير مقروء"
                             }
                         } else {
                             when (readFilter) {
                                 ReadFilter.ALL -> "Read: All"
+                                ReadFilter.OPEN -> "Status: Open"
+                                ReadFilter.CLOSED -> "Status: Closed"
+                                ReadFilter.MUTED -> "Status: Muted"
                                 ReadFilter.READ -> "Read: Read"
                                 ReadFilter.UNREAD -> "Read: Unread"
                             }
@@ -392,20 +445,12 @@ fun ConversationsScreen(
                     )
                     TabChip(
                         label = if (locale == AppLocale.AR) {
-                            when (assignmentFilter) {
-                                AssignmentFilter.ALL -> "التعيين: الكل"
-                                AssignmentFilter.MY -> "التعيين: محادثاتي"
-                                AssignmentFilter.UNASSIGNED -> "التعيين: غير معين"
-                            }
+                            "الوكيل: ${availableAgents.firstOrNull { it.id == selectedAgentId }?.name ?: "الكل"}"
                         } else {
-                            when (assignmentFilter) {
-                                AssignmentFilter.ALL -> "Assignment: All"
-                                AssignmentFilter.MY -> "Assignment: My conversations"
-                                AssignmentFilter.UNASSIGNED -> "Assignment: Unassigned"
-                            }
+                            "Agent: ${availableAgents.firstOrNull { it.id == selectedAgentId }?.name ?: "All"}"
                         },
                         count = conversations.size,
-                        selected = assignmentFilter != AssignmentFilter.ALL,
+                        selected = selectedAgentId != null,
                         showCaret = true,
                         onClick = { showAssignmentFilterDialog = true }
                     )
@@ -479,7 +524,7 @@ fun ConversationsScreen(
             isRefreshing = isPullRefreshing,
             onRefresh = {
                 isPullRefreshing = true
-                onRefreshConversations()
+                onRefreshConversations(toServerFilters())
             },
             modifier = Modifier.fillMaxSize()
         ) {
@@ -496,7 +541,7 @@ fun ConversationsScreen(
                 }
             } else {
                 LazyColumn(state = listState) {
-                    items(filtered.take(visibleConversationCount), key = { it.id }) { convo ->
+                    items(filtered, key = { it.id }) { convo ->
                     val isSelected = selectedConversationIds.contains(convo.id)
                     val markReadAction = convo.unreadCount > 0
                     val dismissState = rememberSwipeToDismissBoxState(
@@ -638,26 +683,7 @@ fun ConversationsScreen(
                         }
                     }
                 }
-                    if (visibleConversationCount < filtered.size) {
-                        item(key = "load-more-conversations") {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 12.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    if (locale == AppLocale.AR) "جارٍ تحميل المزيد..." else "Loading more...",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            LaunchedEffect(visibleConversationCount, filtered.size) {
-                                visibleConversationCount = (visibleConversationCount + 30).coerceAtMost(filtered.size)
-                            }
-                        }
-                    }
-                    if (visibleConversationCount >= filtered.size && hasMoreConversations) {
+                    if (hasMoreConversations) {
                         item(key = "load-more-conversations-server") {
                             Box(
                                 modifier = Modifier
@@ -845,13 +871,18 @@ fun ConversationsScreen(
                         value = newPhone,
                         onValueChange = { newPhone = it },
                         singleLine = true,
-                        label = { Text(tr(locale, TextKey.PHONE_LABEL)) }
+                        label = { Text(tr(locale, TextKey.PHONE_LABEL)) },
+                        placeholder = { Text("+96654377556") },
+                        supportingText = {
+                            Text(
+                                if (locale == AppLocale.AR) "صيغة دولية بدون مسافات" else "International format, no spaces"
+                            )
+                        }
                     )
                     OutlinedTextField(
                         value = contactSearch,
                         onValueChange = {
                             contactSearch = it
-                            visibleContactCount = 25
                             onSearchContacts(it)
                         },
                         singleLine = true,
@@ -889,7 +920,7 @@ fun ConversationsScreen(
                                     .fillMaxWidth()
                                     .heightIn(min = 160.dp, max = 320.dp)
                             ) {
-                                items(filteredContacts.take(visibleContactCount), key = { it.id }) { item ->
+                                items(filteredContacts, key = { it.id }) { item ->
                                     HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
                                     Row(
                                         modifier = Modifier
@@ -918,7 +949,7 @@ fun ConversationsScreen(
                                         )
                                     }
                                 }
-                                if (visibleContactCount < filteredContacts.size) {
+                                if (hasMoreContacts) {
                                     item(key = "load-more-contacts") {
                                         Box(
                                             modifier = Modifier
@@ -926,14 +957,24 @@ fun ConversationsScreen(
                                                 .padding(vertical = 10.dp),
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            Text(
-                                                if (locale == AppLocale.AR) "تحميل المزيد من جهات الاتصال..." else "Loading more contacts...",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
+                                            if (isLoadingMoreContacts) {
+                                                Text(
+                                                    if (locale == AppLocale.AR) "جارٍ تحميل المزيد من جهات الاتصال..." else "Loading more contacts...",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            } else {
+                                                Text(
+                                                    if (locale == AppLocale.AR) "تحميل المزيد من جهات الاتصال..." else "Load more contacts...",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
                                         }
-                                        LaunchedEffect(visibleContactCount, filteredContacts.size) {
-                                            visibleContactCount = (visibleContactCount + 25).coerceAtMost(filteredContacts.size)
+                                        LaunchedEffect(hasMoreContacts, isLoadingMoreContacts, filteredContacts.size) {
+                                            if (hasMoreContacts && !isLoadingMoreContacts) {
+                                                onLoadMoreContacts()
+                                            }
                                         }
                                     }
                                 }
@@ -965,7 +1006,14 @@ fun ConversationsScreen(
             title = { Text(if (locale == AppLocale.AR) "تصفية القراءة" else "Read filter") },
             text = {
                 Column {
-                    listOf(ReadFilter.ALL, ReadFilter.READ, ReadFilter.UNREAD).forEach { option ->
+                    listOf(
+                        ReadFilter.ALL,
+                        ReadFilter.OPEN,
+                        ReadFilter.CLOSED,
+                        ReadFilter.MUTED,
+                        ReadFilter.READ,
+                        ReadFilter.UNREAD
+                    ).forEach { option ->
                         TextButton(onClick = {
                             readFilter = option
                             showReadFilterDialog = false
@@ -973,6 +1021,9 @@ fun ConversationsScreen(
                             Text(
                                 when (option) {
                                     ReadFilter.ALL -> if (locale == AppLocale.AR) "الكل" else "All"
+                                    ReadFilter.OPEN -> if (locale == AppLocale.AR) "مفتوح" else "Open"
+                                    ReadFilter.CLOSED -> if (locale == AppLocale.AR) "مغلق" else "Closed"
+                                    ReadFilter.MUTED -> if (locale == AppLocale.AR) "مكتوم" else "Muted"
                                     ReadFilter.READ -> if (locale == AppLocale.AR) "مقروء" else "Read"
                                     ReadFilter.UNREAD -> if (locale == AppLocale.AR) "غير مقروء" else "Unread"
                                 }
@@ -991,18 +1042,18 @@ fun ConversationsScreen(
             title = { Text(if (locale == AppLocale.AR) "تصفية التعيين" else "Assignment filter") },
             text = {
                 Column {
-                    listOf(AssignmentFilter.ALL, AssignmentFilter.MY, AssignmentFilter.UNASSIGNED).forEach { option ->
+                    TextButton(onClick = {
+                        selectedAgentId = null
+                        showAssignmentFilterDialog = false
+                    }) {
+                        Text(if (locale == AppLocale.AR) "الكل" else "All agents")
+                    }
+                    availableAgents.forEach { agent ->
                         TextButton(onClick = {
-                            assignmentFilter = option
+                            selectedAgentId = agent.id
                             showAssignmentFilterDialog = false
                         }) {
-                            Text(
-                                when (option) {
-                                    AssignmentFilter.ALL -> if (locale == AppLocale.AR) "الكل" else "All"
-                                    AssignmentFilter.MY -> if (locale == AppLocale.AR) "محادثاتي" else "My conversations"
-                                    AssignmentFilter.UNASSIGNED -> if (locale == AppLocale.AR) "غير معين" else "Unassigned"
-                                }
-                            )
+                            Text(agent.name)
                         }
                     }
                 }

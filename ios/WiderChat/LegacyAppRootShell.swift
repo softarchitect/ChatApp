@@ -16,7 +16,7 @@ struct LegacyAppRootView: View {
         .environment(\.layoutDirection, vm.locale == .ar ? .rightToLeft : .leftToRight)
         .preferredColorScheme(vm.darkMode ? .dark : .light)
         .onReceive(NotificationCenter.default.publisher(for: PushNotificationBridge.didOpenChat)) { note in
-            if let chatId = note.userInfo?["chat_id"] as? String {
+            if let chatId = (note.userInfo?["contact_id"] as? String) ?? (note.userInfo?["chat_id"] as? String) {
                 vm.onNotificationOpenChat(chatId: chatId)
             }
         }

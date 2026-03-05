@@ -32,6 +32,7 @@ protocol ChatRepository {
     func updateContact(contactId: Int, name: String, phone: String, email: String?) async -> [String: Any]?
     func createOrUpdateTag(name: String, color: String, tagId: Int?) async -> [String: Any]?
     func createOrUpdateReply(name: String, text: String, replyId: Int?) async -> [String: Any]?
+    func registerPushToken(token: String, platform: String) async -> Bool
 
     func currentSessionSnapshot() -> APISession?
     func currentUserSnapshot() -> (name: String?, email: String?)

@@ -1,26 +1,37 @@
 import Foundation
 import UIKit
 import UserNotifications
+import FirebaseCore
+import FirebaseMessaging
 
-final class NotificationAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+final class NotificationAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate, MessagingDelegate {
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        if FirebaseApp.app() == nil,
+           let optionsPath = Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist"),
+           let options = FirebaseOptions(contentsOfFile: optionsPath) {
+            FirebaseApp.configure(options: options)
+        }
+        Messaging.messaging().delegate = self
         UNUserNotificationCenter.current().delegate = self
         requestNotificationAuthorization(application)
         if
             let remotePayload = launchOptions?[.remoteNotification] as? [AnyHashable: Any],
-            let chatId = PushNotificationBridge.extractChatId(from: remotePayload)
+            let contactId = PushNotificationBridge.extractChatId(from: remotePayload)
         {
-            PushNotificationBridge.postOpenChat(chatId: chatId)
+            PushNotificationBridge.postOpenChat(contactId: contactId)
         }
         return true
     }
 
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
-        let token = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
-        PushNotificationBridge.postToken(token)
+        Messaging.messaging().apnsToken = deviceToken
+        Messaging.messaging().token { token, _ in
+            guard let token else { return }
+            PushNotificationBridge.postToken(token)
+        }
     }
 
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
@@ -31,8 +42,8 @@ final class NotificationAppDelegate: NSObject, UIApplicationDelegate, UNUserNoti
         _ application: UIApplication,
         didReceiveRemoteNotification userInfo: [AnyHashable: Any]
     ) async -> UIBackgroundFetchResult {
-        if let chatId = PushNotificationBridge.extractChatId(from: userInfo) {
-            PushNotificationBridge.postOpenChat(chatId: chatId)
+        if let contactId = PushNotificationBridge.extractChatId(from: userInfo) {
+            PushNotificationBridge.postOpenChat(contactId: contactId)
         }
         return .newData
     }
@@ -43,8 +54,8 @@ final class NotificationAppDelegate: NSObject, UIApplicationDelegate, UNUserNoti
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
         let userInfo = notification.request.content.userInfo
-        if let chatId = PushNotificationBridge.extractChatId(from: userInfo) {
-            PushNotificationBridge.postOpenChat(chatId: chatId)
+        if let contactId = PushNotificationBridge.extractChatId(from: userInfo) {
+            PushNotificationBridge.postOpenChat(contactId: contactId)
         }
         completionHandler([.banner, .sound, .badge])
     }
@@ -55,8 +66,8 @@ final class NotificationAppDelegate: NSObject, UIApplicationDelegate, UNUserNoti
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         let userInfo = response.notification.request.content.userInfo
-        if let chatId = PushNotificationBridge.extractChatId(from: userInfo) {
-            PushNotificationBridge.postOpenChat(chatId: chatId)
+        if let contactId = PushNotificationBridge.extractChatId(from: userInfo) {
+            PushNotificationBridge.postOpenChat(contactId: contactId)
         }
         completionHandler()
     }
@@ -68,5 +79,10 @@ final class NotificationAppDelegate: NSObject, UIApplicationDelegate, UNUserNoti
                 application.registerForRemoteNotifications()
             }
         }
+    }
+
+    func messaging(_ messaging: Messaging, didReceiveRegistrationToken fcmToken: String?) {
+        guard let token = fcmToken else { return }
+        PushNotificationBridge.postToken(token)
     }
 }

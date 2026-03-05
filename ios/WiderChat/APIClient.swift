@@ -24,18 +24,28 @@ final class WidersAPIClient {
         try await postJSON(path: "/api/login", body: ["email": email, "password": password])
     }
 
-    func getChatsList(session: APISession, page: Int = 1, limit: Int = 30) async throws -> [String: Any] {
+    func getChatsList(
+        session: APISession,
+        page: Int = 1,
+        limit: Int = 30,
+        status: String = "all",
+        tag: String = "all",
+        agent: String = "all",
+        rating: String = "all",
+        tap: String = "all",
+        orderBy: String = "default"
+    ) async throws -> [String: Any] {
         try await postJSON(
             path: "/api/wpbox/getConversations/none",
             body: sessionBody(session, extra: [
                 "page": String(page),
                 "limit": limit,
-                "status": "all",
-                "tag": "all",
-                "agent": "all",
-                "rating": "all",
-                "tap": "all",
-                "order_by": "default"
+                "status": status,
+                "tag": tag,
+                "agent": agent,
+                "rating": rating,
+                "tap": tap,
+                "order_by": orderBy
             ])
         )
     }
@@ -212,6 +222,21 @@ final class WidersAPIClient {
         var body = sessionBody(session, extra: ["name": name, "text": text])
         if let replyId { body["reply_id"] = replyId }
         return try await postJSON(path: "/api/chats/replies/create", body: body)
+    }
+
+    func registerPushToken(session: APISession, pushToken: String, platform: String) async throws -> [String: Any] {
+        let normalizedToken = pushToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedToken.isEmpty else {
+            throw NSError(domain: "WidersAPIClient", code: 422, userInfo: [NSLocalizedDescriptionKey: "Push token is blank"])
+        }
+        _ = platform
+        return try await postJSON(
+            path: "/api/wpbox/fcm/store-token",
+            body: [
+                "token": session.token,
+                "fcm_token": normalizedToken
+            ]
+        )
     }
 
     private func sessionBody(_ session: APISession, extra: [String: Any] = [:]) -> [String: Any] {

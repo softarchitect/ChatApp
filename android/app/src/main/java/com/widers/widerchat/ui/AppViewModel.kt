@@ -53,6 +53,10 @@ data class AppUiState(
     val availableWorkspaces: List<WorkspaceOption> = emptyList(),
     val hasMoreConversations: Boolean = false,
     val isLoadingMoreConversations: Boolean = false,
+    val hasMoreNewConversationContacts: Boolean = false,
+    val isLoadingMoreNewConversationContacts: Boolean = false,
+    val pushDebugInfo: String? = null,
+    val pushDebugRawToken: String? = null,
     val availableTags: List<AvailableTag> = emptyList(),
     val availableAgents: List<AvailableAgent> = emptyList(),
     val availableCustomFields: List<AvailableCustomField> = emptyList(),
@@ -72,6 +76,15 @@ data class NewConversationContact(
     val phone: String
 )
 
+data class ConversationsServerFilters(
+    val status: String = "all",
+    val tag: String = "all",
+    val agent: String = "all",
+    val rating: String = "all",
+    val tap: String = "all",
+    val orderBy: String = "default"
+)
+
 class AppViewModel(
     private val repository: ChatRepository = NetworkChatRepository()
 ) : ViewModel() {
@@ -88,6 +101,11 @@ class AppViewModel(
     )
     private var pendingNotificationChatId: String? = null
     private var latestPushToken: String? = null
+    private var activeConversationFilters: ConversationsServerFilters = ConversationsServerFilters()
+    private var contactsNextPage: Int = 1
+    private var contactsHasMore: Boolean = true
+    private val contactsPageSize: Int = 25
+    private var contactsSearchMode: Boolean = false
 
     fun login(email: String, password: String) {
         if (email.isBlank() || password.isBlank()) {
@@ -116,6 +134,7 @@ class AppViewModel(
                     isLoadingMoreConversations = networkRepo()?.isLoadingMoreConversationsSnapshot() ?: false
                 )
                 networkRepo()?.currentCompanyIdSnapshot()?.let { realtimeClient.connect(it) }
+                tryRegisterLatestPushToken()
                 launchPostLoginDataWarmup()
                 pendingNotificationChatId?.let {
                     pendingNotificationChatId = null
@@ -153,6 +172,7 @@ class AppViewModel(
                     isLoadingMoreConversations = repo.isLoadingMoreConversationsSnapshot()
                 )
                 repo.currentCompanyIdSnapshot()?.let { realtimeClient.connect(it) }
+                tryRegisterLatestPushToken()
                 launchPostLoginDataWarmup()
                 pendingNotificationChatId?.let {
                     pendingNotificationChatId = null
@@ -197,6 +217,7 @@ class AppViewModel(
                     actionStatus = "Workspace switched"
                 )
                 repo.currentCompanyIdSnapshot()?.let { realtimeClient.connect(it) }
+                tryRegisterLatestPushToken()
                 refreshAvailableTags()
                 refreshAvailableAgents()
                 refreshAvailableTemplates()
@@ -216,6 +237,10 @@ class AppViewModel(
         realtimeClient.setActiveChat(null)
         realtimeClient.disconnect()
         pendingNotificationChatId = null
+        activeConversationFilters = ConversationsServerFilters()
+        contactsNextPage = 1
+        contactsHasMore = true
+        contactsSearchMode = false
         _uiState.value = _uiState.value.copy(
             isLoggedIn = false,
             screen = AppScreen.LOGIN,
@@ -231,6 +256,11 @@ class AppViewModel(
             availableWorkspaces = emptyList(),
             hasMoreConversations = false,
             isLoadingMoreConversations = false,
+            hasMoreNewConversationContacts = false,
+            isLoadingMoreNewConversationContacts = false,
+            pushDebugInfo = null,
+            pushDebugRawToken = null,
+            newConversationContacts = emptyList(),
             availableAgents = emptyList(),
             availableCustomFields = emptyList(),
             availableTemplates = emptyList(),
@@ -257,7 +287,36 @@ class AppViewModel(
         val normalized = token.trim()
         if (normalized.isEmpty() || normalized == latestPushToken) return
         latestPushToken = normalized
-        // Backend token registration endpoint not available yet.
+        updatePushDebugStatus("Token received", normalized)
+        tryRegisterLatestPushToken()
+    }
+
+    private fun tryRegisterLatestPushToken() {
+        val pushToken = latestPushToken ?: return
+        if (!_uiState.value.isLoggedIn) {
+            updatePushDebugStatus("Waiting for login", pushToken)
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            updatePushDebugStatus("Registering...", pushToken)
+            val ok = repository.registerPushToken(pushToken, platform = "android")
+            updatePushDebugStatus(if (ok) "Registered" else "Registration failed", pushToken)
+        }
+    }
+
+    private fun updatePushDebugStatus(status: String, token: String?) {
+        if (!BuildConfig.DEBUG) return
+        val masked = token?.let(::maskPushToken).orEmpty().ifBlank { "n/a" }
+        _uiState.value = _uiState.value.copy(
+            pushDebugInfo = "Token: $masked\nLast attempt: ${nowLabel()}\nResult: $status",
+            pushDebugRawToken = token
+        )
+    }
+
+    private fun maskPushToken(token: String): String {
+        val normalized = token.trim()
+        if (normalized.length <= 10) return "***"
+        return "${normalized.take(6)}...${normalized.takeLast(4)}"
     }
 
     fun setLocale(locale: AppLocale) {
@@ -330,15 +389,18 @@ class AppViewModel(
     }
 
     fun backToConversations() {
+        val lastActive = _uiState.value.activeChatId
         stopActiveChatPolling()
         realtimeClient.setActiveChat(null)
         _uiState.value = _uiState.value.copy(
             screen = AppScreen.CONVERSATIONS,
+            activeChatId = null,
+            activeMessages = emptyList(),
             isChatLoading = false,
             hasMoreActiveMessages = false,
             isLoadingMoreActiveMessages = false
         )
-        refreshConversations()
+        refreshConversations(lastOpenedConversationId = lastActive)
     }
 
     fun loadOlderMessagesForActiveChat() {
@@ -715,27 +777,11 @@ class AppViewModel(
         }
         viewModelScope.launch(Dispatchers.IO) {
             runAction {
-                val result = networkRepo()?.searchChats(keyword, 1, 50)
-                val items = result?.optJSONArray("data") ?: result?.optJSONArray("chats")
-                if (items == null) {
-                    setActionStatus("Search completed")
-                    return@runAction
-                }
-                val ids = buildSet {
-                    for (i in 0 until items.length()) {
-                        val item = items.optJSONObject(i) ?: continue
-                        val id = sequenceOf("contact_id", "id", "conversation_id")
-                            .mapNotNull { key -> item.opt(key)?.toString()?.trim() }
-                            .firstOrNull { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
-                            ?: continue
-                        add(id)
-                    }
-                }
-                val conversations = repository.getConversations().filter { convo ->
-                    convo.id in ids ||
+                val conversations = networkRepo()?.searchConversations(keyword, page = 1, limit = 50)
+                    ?: repository.getConversations().filter { convo ->
                         convo.customerName.contains(keyword, ignoreCase = true) ||
-                        convo.lastMessage.contains(keyword, ignoreCase = true)
-                }
+                            convo.lastMessage.contains(keyword, ignoreCase = true)
+                    }
                 _uiState.value = _uiState.value.copy(conversations = conversations, actionStatus = "Search completed")
             }
         }
@@ -763,9 +809,16 @@ class AppViewModel(
 
     fun addContact(name: String, phone: String, email: String?) {
         if (name.isBlank() || phone.isBlank()) return
+        val normalizedPhone = normalizeInternationalPhone(phone)
+        if (normalizedPhone == null) {
+            _uiState.value = _uiState.value.copy(
+                actionStatus = "Failed: phone must be in international format, e.g. +96654377556"
+            )
+            return
+        }
         viewModelScope.launch(Dispatchers.IO) {
             runAction {
-                networkRepo()?.addContact(name, phone, email)
+                networkRepo()?.addContact(name.trim(), normalizedPhone, email?.trim())
                 setActionStatus("Contact added")
             }
         }
@@ -773,9 +826,16 @@ class AppViewModel(
 
     fun startNewConversation(name: String, phone: String) {
         if (name.isBlank() || phone.isBlank()) return
+        val normalizedPhone = normalizeInternationalPhone(phone)
+        if (normalizedPhone == null) {
+            _uiState.value = _uiState.value.copy(
+                actionStatus = "Failed: phone must be in international format, e.g. +96654377556"
+            )
+            return
+        }
         viewModelScope.launch(Dispatchers.IO) {
             runAction {
-                val addResult = networkRepo()?.addContact(name.trim(), phone.trim(), null)
+                val addResult = networkRepo()?.addContact(name.trim(), normalizedPhone, null)
                 val conversations = repository.getConversations()
                 _uiState.value = _uiState.value.copy(conversations = conversations)
 
@@ -789,12 +849,12 @@ class AppViewModel(
                             ?.takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) }
                     }
                     .firstOrNull()
-                val normalizedPhone = phone.filter { it.isDigit() }
+                val normalizedPhoneDigits = normalizedPhone.filter { it.isDigit() }
                 val created = when {
                     !createdId.isNullOrBlank() -> conversations.firstOrNull { it.id == createdId }
                     else -> conversations.firstOrNull { convo ->
                         convo.customerName.equals(name.trim(), ignoreCase = true) ||
-                            convo.customerPhone.filter { it.isDigit() }.endsWith(normalizedPhone)
+                            convo.customerPhone.filter { it.isDigit() }.endsWith(normalizedPhoneDigits)
                     }
                 }
 
@@ -811,17 +871,53 @@ class AppViewModel(
     }
 
     fun loadContactsForNewConversation() {
+        contactsSearchMode = false
+        contactsNextPage = 1
+        contactsHasMore = true
         viewModelScope.launch(Dispatchers.IO) {
             _uiState.value = _uiState.value.copy(contactsLoading = true)
             try {
-                val payload = networkRepo()?.getContacts()
+                val payload = networkRepo()?.getContactsPage(page = contactsNextPage, limit = contactsPageSize)
                 val parsed = parseNewConversationContacts(payload)
+                contactsHasMore = parsed.size >= contactsPageSize
+                contactsNextPage = if (contactsHasMore) 2 else 1
                 _uiState.value = _uiState.value.copy(
                     newConversationContacts = parsed,
+                    hasMoreNewConversationContacts = contactsHasMore,
+                    isLoadingMoreNewConversationContacts = false,
                     contactsLoading = false
                 )
             } catch (_: Exception) {
-                _uiState.value = _uiState.value.copy(contactsLoading = false)
+                _uiState.value = _uiState.value.copy(
+                    contactsLoading = false,
+                    isLoadingMoreNewConversationContacts = false
+                )
+            }
+        }
+    }
+
+    fun loadMoreContactsForNewConversation() {
+        if (contactsSearchMode || !contactsHasMore || _uiState.value.contactsLoading || _uiState.value.isLoadingMoreNewConversationContacts) {
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            _uiState.value = _uiState.value.copy(isLoadingMoreNewConversationContacts = true)
+            try {
+                val payload = networkRepo()?.getContactsPage(page = contactsNextPage, limit = contactsPageSize)
+                val parsed = parseNewConversationContacts(payload)
+                if (parsed.isEmpty()) {
+                    contactsHasMore = false
+                } else {
+                    contactsHasMore = parsed.size >= contactsPageSize
+                    if (contactsHasMore) contactsNextPage += 1
+                }
+                _uiState.value = _uiState.value.copy(
+                    newConversationContacts = (_uiState.value.newConversationContacts + parsed).distinctBy { it.id },
+                    hasMoreNewConversationContacts = contactsHasMore,
+                    isLoadingMoreNewConversationContacts = false
+                )
+            } catch (_: Exception) {
+                _uiState.value = _uiState.value.copy(isLoadingMoreNewConversationContacts = false)
             }
         }
     }
@@ -832,16 +928,23 @@ class AppViewModel(
             loadContactsForNewConversation()
             return
         }
+        contactsSearchMode = true
+        contactsHasMore = false
         viewModelScope.launch(Dispatchers.IO) {
             _uiState.value = _uiState.value.copy(contactsLoading = true)
             try {
                 val payload = networkRepo()?.searchContacts(trimmed)
                 _uiState.value = _uiState.value.copy(
                     newConversationContacts = parseNewConversationContacts(payload),
+                    hasMoreNewConversationContacts = false,
+                    isLoadingMoreNewConversationContacts = false,
                     contactsLoading = false
                 )
             } catch (_: Exception) {
-                _uiState.value = _uiState.value.copy(contactsLoading = false)
+                _uiState.value = _uiState.value.copy(
+                    contactsLoading = false,
+                    isLoadingMoreNewConversationContacts = false
+                )
             }
         }
     }
@@ -882,13 +985,30 @@ class AppViewModel(
     fun updateCurrentContact(name: String, phone: String, email: String?) {
         val contactId = _uiState.value.activeChatId?.toLongOrNull() ?: return
         if (name.isBlank() || phone.isBlank()) return
+        val normalizedPhone = normalizeInternationalPhone(phone)
+        if (normalizedPhone == null) {
+            _uiState.value = _uiState.value.copy(
+                actionStatus = "Failed: phone must be in international format, e.g. +96654377556"
+            )
+            return
+        }
         viewModelScope.launch(Dispatchers.IO) {
             runAction {
-                networkRepo()?.updateContact(contactId, name, phone, email)
+                networkRepo()?.updateContact(contactId, name.trim(), normalizedPhone, email?.trim())
                 val conversations = repository.getConversations()
                 _uiState.value = _uiState.value.copy(conversations = conversations, actionStatus = "Contact updated")
             }
         }
+    }
+
+    fun updateProfile(name: String, email: String) {
+        val normalizedName = name.trim()
+        val normalizedEmail = email.trim()
+        if (normalizedName.isBlank()) return
+        _uiState.value = _uiState.value.copy(
+            profileName = normalizedName,
+            profileEmail = normalizedEmail
+        )
     }
 
     fun clearActionStatus() {
@@ -979,10 +1099,39 @@ class AppViewModel(
         return SimpleDateFormat("h:mm a", locale).format(Date())
     }
 
-    private fun refreshConversations() {
+    private fun normalizeInternationalPhone(raw: String): String? {
+        val compact = raw.filterNot { it.isWhitespace() }
+        if (!compact.startsWith("+")) return null
+        val digits = compact.drop(1)
+        if (digits.length !in 8..15) return null
+        if (!digits.all { it.isDigit() }) return null
+        return "+$digits"
+    }
+
+    private fun refreshConversations(lastOpenedConversationId: String? = null) {
         viewModelScope.launch(Dispatchers.IO) {
             val repo = networkRepo()
-            val conversations = repository.getConversations()
+            val fetched = if (repo != null) {
+                repo.refreshConversationsFirstPage(
+                    NetworkChatRepository.ConversationsRequestFilters(
+                        status = activeConversationFilters.status,
+                        tag = activeConversationFilters.tag,
+                        agent = activeConversationFilters.agent,
+                        rating = "all",
+                        tap = activeConversationFilters.tap,
+                        orderBy = activeConversationFilters.orderBy
+                    )
+                )
+            } else {
+                repository.getConversations()
+            }
+            val conversations = if (lastOpenedConversationId.isNullOrBlank()) {
+                fetched
+            } else {
+                fetched.map {
+                    if (it.id == lastOpenedConversationId) it.copy(unreadCount = 0) else it
+                }
+            }
             _uiState.value = _uiState.value.copy(
                 conversations = conversations,
                 hasMoreConversations = repo?.hasMoreConversationsSnapshot() ?: false,
@@ -991,11 +1140,28 @@ class AppViewModel(
         }
     }
 
-    fun refreshConversationsList() {
+    fun refreshConversationsList(filters: ConversationsServerFilters = activeConversationFilters) {
+        activeConversationFilters = filters
         viewModelScope.launch(Dispatchers.IO) {
             val repo = networkRepo()
+            val requestFilters = NetworkChatRepository.ConversationsRequestFilters(
+                status = activeConversationFilters.status,
+                tag = activeConversationFilters.tag,
+                agent = activeConversationFilters.agent,
+                rating = "all",
+                tap = activeConversationFilters.tap,
+                orderBy = activeConversationFilters.orderBy
+            )
             val conversations = if (repo != null) {
-                repo.refreshConversationsFirstPage()
+                var loaded = repo.refreshConversationsFirstPage(requestFilters)
+                if (activeConversationFilters.rating != "all") {
+                    var pagesLoaded = 1
+                    while (repo.hasMoreConversationsSnapshot() && pagesLoaded < 25) {
+                        loaded = repo.loadMoreConversationsPage(requestFilters)
+                        pagesLoaded += 1
+                    }
+                }
+                loaded
             } else {
                 repository.getConversations()
             }
@@ -1013,7 +1179,16 @@ class AppViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             _uiState.value = _uiState.value.copy(isLoadingMoreConversations = true)
             try {
-                val conversations = repo.loadMoreConversationsPage()
+                val conversations = repo.loadMoreConversationsPage(
+                    NetworkChatRepository.ConversationsRequestFilters(
+                        status = activeConversationFilters.status,
+                        tag = activeConversationFilters.tag,
+                        agent = activeConversationFilters.agent,
+                        rating = "all",
+                        tap = activeConversationFilters.tap,
+                        orderBy = activeConversationFilters.orderBy
+                    )
+                )
                 _uiState.value = _uiState.value.copy(
                     conversations = conversations,
                     hasMoreConversations = repo.hasMoreConversationsSnapshot(),
@@ -1287,7 +1462,16 @@ class AppViewModel(
             try {
                 val repo = networkRepo()
                 val conversations = if (repo != null) {
-                    repo.refreshConversationsFirstPage()
+                    repo.refreshConversationsFirstPage(
+                        NetworkChatRepository.ConversationsRequestFilters(
+                            status = activeConversationFilters.status,
+                            tag = activeConversationFilters.tag,
+                            agent = activeConversationFilters.agent,
+                            rating = "all",
+                            tap = activeConversationFilters.tap,
+                            orderBy = activeConversationFilters.orderBy
+                        )
+                    )
                 } else {
                     repository.getConversations()
                 }
@@ -1370,7 +1554,20 @@ class AppViewModel(
         realtimeConversationsRefreshJob = viewModelScope.launch(Dispatchers.IO) {
             delay(250)
             val repo = networkRepo()
-            val conversations = repository.getConversations()
+            val conversations = if (repo != null) {
+                repo.refreshConversationsFirstPage(
+                    NetworkChatRepository.ConversationsRequestFilters(
+                        status = activeConversationFilters.status,
+                        tag = activeConversationFilters.tag,
+                        agent = activeConversationFilters.agent,
+                        rating = "all",
+                        tap = activeConversationFilters.tap,
+                        orderBy = activeConversationFilters.orderBy
+                    )
+                )
+            } else {
+                repository.getConversations()
+            }
             _uiState.value = _uiState.value.copy(
                 conversations = conversations,
                 hasMoreConversations = repo?.hasMoreConversationsSnapshot() ?: false,

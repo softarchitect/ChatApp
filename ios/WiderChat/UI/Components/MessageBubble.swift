@@ -11,6 +11,27 @@ struct MessageBubble: View {
 
     var body: some View {
         VStack(alignment: isAgent ? .trailing : .leading, spacing: 4) {
+            if message.type == .system {
+                HStack {
+                    Spacer()
+                    VStack(spacing: 3) {
+                        Text(message.content)
+                            .font(.system(size: 12, weight: .regular))
+                            .foregroundStyle(darkMode ? Color(red: 0.88, green: 0.90, blue: 0.93) : Color(red: 0.22, green: 0.25, blue: 0.30))
+                            .multilineTextAlignment(.center)
+                        if !message.timestamp.isEmpty {
+                            Text(message.timestamp)
+                                .font(.system(size: 10))
+                                .foregroundStyle(AppPalette.textMuted)
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(darkMode ? Color(red: 0.22, green: 0.24, blue: 0.27) : Color(red: 0.90, green: 0.91, blue: 0.93))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    Spacer()
+                }
+            } else
             if message.type == .note {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(tr(locale, .internalNoteBadge)).font(.system(size: 10, weight: .bold)).foregroundStyle(Color.orange)

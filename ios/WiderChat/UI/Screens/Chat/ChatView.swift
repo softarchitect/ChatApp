@@ -85,11 +85,13 @@ struct ChatView: View {
                                     SatisfactionBadge(value: satisfaction, locale: vm.locale, variant: .regular)
                                 }
                             }
-                            HStack(spacing: 6) {
-                                Circle().fill((currentConversation?.isOnline ?? false) ? AppPalette.primary : AppPalette.textMuted).frame(width: 7, height: 7)
-                                Text((currentConversation?.isOnline ?? false) ? tr(vm.locale, .online) : "\(tr(vm.locale, .lastSeen)) \(tr(vm.locale, .today))")
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(AppPalette.textMuted)
+                            if currentConversation?.isOnline ?? false {
+                                HStack(spacing: 6) {
+                                    Circle().fill(AppPalette.primary).frame(width: 7, height: 7)
+                                    Text(tr(vm.locale, .online))
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(AppPalette.textMuted)
+                                }
                             }
                         }
                     }
@@ -164,6 +166,15 @@ struct ChatView: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 6)
                     .background(isMetaWindowWarning ? Color.red : AppPalette.secondarySoft)
+            }
+            if currentConversation?.isWindowExpired == true {
+                Text(vm.locale == .ar ? "انتهت نافذة 24 ساعة. يجب إرسال قالب." : "24-hour window expired. You must send a template.")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Color.white)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
+                    .background(Color.red)
             }
 
             ZStack {
@@ -442,6 +453,7 @@ struct ChatView: View {
                             Button {
                                 vm.attachTagToCurrentChat(tagId: tag.id)
                                 messageInput = ""
+                                forceAutoScroll = true
                             } label: {
                                 Text(tag.name)
                                     .font(.system(size: 13))
@@ -931,7 +943,7 @@ struct ChatView: View {
         }
         .alert(tr(vm.locale, .updateContact), isPresented: $showUpdateContactDialog) {
             TextField(tr(vm.locale, .nameLabel), text: $updateContactName)
-            TextField(tr(vm.locale, .phoneLabel), text: $updateContactPhone)
+            TextField("+96654377556", text: $updateContactPhone)
             TextField(tr(vm.locale, .emailOptional), text: $updateContactEmail)
             Button(tr(vm.locale, .cancel), role: .cancel) {}
             Button(tr(vm.locale, .save)) {
@@ -955,18 +967,17 @@ struct ChatView: View {
                         ForEach(filteredFields) { field in
                             Button {
                                 customFieldId = field.id
-                                if customFieldValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                    customFieldValue = field.value ?? ""
-                                }
+                                customFieldValue = field.value ?? ""
                             } label: {
                                 HStack {
                                     Text(field.label)
                                         .foregroundStyle(AppPalette.textPrimary)
                                         .lineLimit(1)
                                     Spacer()
-                                    Text("#\(field.id)")
+                                    Text(field.value ?? "")
                                         .font(.system(size: 11))
                                         .foregroundStyle(AppPalette.textMuted)
+                                        .lineLimit(1)
                                 }
                             }
                             .buttonStyle(.plain)
@@ -975,11 +986,6 @@ struct ChatView: View {
                     .listStyle(.plain)
 
                     VStack(spacing: 10) {
-                        TextField(tr(vm.locale, .fieldId), text: $customFieldId)
-                            .padding(.horizontal, 12)
-                            .frame(height: 44)
-                            .background(AppPalette.card)
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
                         TextField(tr(vm.locale, .fieldValue), text: $customFieldValue)
                             .padding(.horizontal, 12)
                             .frame(height: 44)
@@ -1193,7 +1199,7 @@ private struct ContactInfoSheet: View {
                         Divider().overlay(AppPalette.border.opacity(0.45))
                         infoRow(
                             label: tr(vm.locale, .presence),
-                            value: (conversation?.isOnline ?? false) ? tr(vm.locale, .online) : tr(vm.locale, .lastSeen)
+                            value: (conversation?.isOnline ?? false) ? tr(vm.locale, .online) : "-"
                         )
                         Divider().overlay(AppPalette.border.opacity(0.45))
                         Button {

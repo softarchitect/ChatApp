@@ -41,19 +41,26 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.widers.widerchat.BuildConfig
 import com.widers.widerchat.core.TextKey
 import com.widers.widerchat.core.tr
 import com.widers.widerchat.domain.model.AppLocale
+import com.widers.widerchat.domain.model.AvailableReply
+import com.widers.widerchat.domain.model.AvailableTag
 import com.widers.widerchat.domain.model.WorkspaceOption
+import kotlinx.coroutines.delay
 
 @Composable
 fun SettingsScreen(
@@ -71,10 +78,15 @@ fun SettingsScreen(
     onOpenTerms: () -> Unit,
     onOpenVersion: () -> Unit,
     onLogout: () -> Unit,
+    onUpdateProfile: (String, String) -> Unit,
     onSyncSupportData: () -> Unit,
     onCreateTag: (String, String, Long?) -> Unit,
     onCreateReply: (String, String, Long?) -> Unit,
+    availableTags: List<AvailableTag>,
+    availableReplies: List<AvailableReply>,
     onAddContact: (String, String, String?) -> Unit,
+    pushDebugInfo: String?,
+    pushDebugRawToken: String?,
     actionStatus: String?
 ) {
     var pushEnabled by remember { mutableStateOf(true) }
@@ -88,10 +100,10 @@ fun SettingsScreen(
     var showContactDialog by remember { mutableStateOf(false) }
     var tagName by remember { mutableStateOf("") }
     var tagColor by remember { mutableStateOf("#ffffff") }
-    var tagId by remember { mutableStateOf("") }
+    var selectedTagId by remember { mutableStateOf<Long?>(null) }
     var replyName by remember { mutableStateOf("") }
     var replyText by remember { mutableStateOf("") }
-    var replyId by remember { mutableStateOf("") }
+    var selectedReplyId by remember { mutableStateOf<Long?>(null) }
     var contactName by remember { mutableStateOf("") }
     var contactPhone by remember { mutableStateOf("") }
     var contactEmail by remember { mutableStateOf("") }
@@ -105,6 +117,17 @@ fun SettingsScreen(
                 !it.equals("null", ignoreCase = true)
         }
     val avatarInitials = remember(accountName) { initialsFrom(accountName) }
+    var profileNameInput by remember { mutableStateOf(accountName) }
+    var profileEmailInput by remember { mutableStateOf(accountEmail.orEmpty()) }
+    var tokenCopied by remember { mutableStateOf(false) }
+    val clipboardManager = LocalClipboardManager.current
+
+    LaunchedEffect(tokenCopied) {
+        if (tokenCopied) {
+            delay(1200)
+            tokenCopied = false
+        }
+    }
 
     Column(modifier = modifier.fillMaxSize()) {
         Column(
@@ -124,7 +147,11 @@ fun SettingsScreen(
             Surface(
                 modifier = Modifier
                     .padding(horizontal = 20.dp)
-                    .clickable { showProfileDialog = true },
+                    .clickable {
+                        profileNameInput = accountName
+                        profileEmailInput = accountEmail.orEmpty()
+                        showProfileDialog = true
+                    },
                 shape = RoundedCornerShape(16.dp),
                 color = MaterialTheme.colorScheme.surface
             ) {
@@ -153,7 +180,16 @@ fun SettingsScreen(
             Spacer(Modifier.height(16.dp))
             SettingsTitle(tr(locale, TextKey.ACCOUNT).uppercase())
             FlatGroup {
-                FlatRow(icon = { Icon(Icons.Outlined.Person, null, tint = Color.White) }, iconBg = Color(0xFF3B82F6), label = tr(locale, TextKey.PROFILE), onClick = { showProfileDialog = true })
+                FlatRow(
+                    icon = { Icon(Icons.Outlined.Person, null, tint = Color.White) },
+                    iconBg = Color(0xFF3B82F6),
+                    label = tr(locale, TextKey.PROFILE),
+                    onClick = {
+                        profileNameInput = accountName
+                        profileEmailInput = accountEmail.orEmpty()
+                        showProfileDialog = true
+                    }
+                )
                 if (availableWorkspaces.size > 1) {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
                     FlatRow(
@@ -172,6 +208,36 @@ fun SettingsScreen(
                 FlatToggleRow(icon = { Icon(Icons.Outlined.NotificationsActive, null, tint = Color.White) }, iconBg = Color(0xFFF43F5E), label = tr(locale, TextKey.PUSH_NOTIFICATIONS), checked = pushEnabled) { pushEnabled = it }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
                 FlatToggleRow(icon = { Icon(Icons.AutoMirrored.Outlined.VolumeUp, null, tint = Color.White) }, iconBg = Color(0xFFF59E0B), label = tr(locale, TextKey.SOUND_ALERTS), checked = soundEnabled) { soundEnabled = it }
+            }
+            if (BuildConfig.DEBUG && !pushDebugInfo.isNullOrBlank()) {
+                Text(
+                    text = pushDebugInfo,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (!pushDebugRawToken.isNullOrBlank()) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TextButton(
+                            onClick = {
+                                clipboardManager.setText(AnnotatedString(pushDebugRawToken))
+                                tokenCopied = true
+                            }
+                        ) {
+                            Text(if (locale == AppLocale.AR) "نسخ الرمز" else "Copy token")
+                        }
+                        if (tokenCopied) {
+                            Text(
+                                text = if (locale == AppLocale.AR) "تم النسخ" else "Copied",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
             }
 
             Spacer(Modifier.height(8.dp))
@@ -255,12 +321,27 @@ fun SettingsScreen(
             title = { Text(tr(locale, TextKey.PROFILE)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("${tr(locale, TextKey.NAME_LABEL)}: $accountName")
-                    Text("${tr(locale, TextKey.EMAIL_LABEL)}: ${accountEmail ?: tr(locale, TextKey.UNAVAILABLE)}")
+                    androidx.compose.material3.OutlinedTextField(
+                        value = profileNameInput,
+                        onValueChange = { profileNameInput = it },
+                        singleLine = true,
+                        label = { Text(tr(locale, TextKey.NAME_LABEL)) }
+                    )
+                    androidx.compose.material3.OutlinedTextField(
+                        value = profileEmailInput,
+                        onValueChange = { profileEmailInput = it },
+                        singleLine = true,
+                        label = { Text(tr(locale, TextKey.EMAIL_LABEL)) }
+                    )
                 }
             },
             dismissButton = { TextButton(onClick = { showProfileDialog = false }) { Text(tr(locale, TextKey.CLOSE)) } },
-            confirmButton = {}
+            confirmButton = {
+                TextButton(onClick = {
+                    onUpdateProfile(profileNameInput, profileEmailInput)
+                    showProfileDialog = false
+                }) { Text(tr(locale, TextKey.SAVE)) }
+            }
         )
     }
 
@@ -314,13 +395,38 @@ fun SettingsScreen(
                     Spacer(Modifier.size(8.dp))
                     androidx.compose.material3.OutlinedTextField(tagColor, { tagColor = it }, label = { Text(tr(locale, TextKey.TAG_COLOR_HEX)) })
                     Spacer(Modifier.size(8.dp))
-                    androidx.compose.material3.OutlinedTextField(tagId, { tagId = it }, label = { Text(tr(locale, TextKey.TAG_ID_OPTIONAL)) })
+                    TextButton(onClick = {
+                        val first = availableTags.firstOrNull()
+                        if (first != null) {
+                            selectedTagId = first.id
+                            tagName = first.name
+                            tagColor = first.colorHex
+                        }
+                    }) {
+                        Text(
+                            if (locale == AppLocale.AR) {
+                                "اختر من الوسوم المتاحة (${availableTags.size})"
+                            } else {
+                                "Select available tag (${availableTags.size})"
+                            }
+                        )
+                    }
+                    availableTags.take(8).forEach { tag ->
+                        TextButton(onClick = {
+                            selectedTagId = tag.id
+                            tagName = tag.name
+                            tagColor = tag.colorHex
+                        }) {
+                            Text("${tag.name} (#${tag.id})")
+                        }
+                    }
                 }
             },
             dismissButton = { TextButton(onClick = { showTagDialog = false }) { Text(tr(locale, TextKey.CANCEL)) } },
             confirmButton = {
                 TextButton(onClick = {
-                    onCreateTag(tagName, tagColor, tagId.toLongOrNull())
+                    onCreateTag(tagName, tagColor, selectedTagId)
+                    selectedTagId = null
                     showTagDialog = false
                 }) { Text(tr(locale, TextKey.SAVE)) }
             }
@@ -337,13 +443,38 @@ fun SettingsScreen(
                     Spacer(Modifier.size(8.dp))
                     androidx.compose.material3.OutlinedTextField(replyText, { replyText = it }, label = { Text(tr(locale, TextKey.REPLY_TEXT)) })
                     Spacer(Modifier.size(8.dp))
-                    androidx.compose.material3.OutlinedTextField(replyId, { replyId = it }, label = { Text(tr(locale, TextKey.REPLY_ID_OPTIONAL)) })
+                    TextButton(onClick = {
+                        val first = availableReplies.firstOrNull()
+                        if (first != null) {
+                            selectedReplyId = first.id
+                            replyName = first.name
+                            replyText = first.text
+                        }
+                    }) {
+                        Text(
+                            if (locale == AppLocale.AR) {
+                                "اختر من الردود المتاحة (${availableReplies.size})"
+                            } else {
+                                "Select available quick reply (${availableReplies.size})"
+                            }
+                        )
+                    }
+                    availableReplies.take(8).forEach { reply ->
+                        TextButton(onClick = {
+                            selectedReplyId = reply.id
+                            replyName = reply.name
+                            replyText = reply.text
+                        }) {
+                            Text("${reply.name} (#${reply.id})")
+                        }
+                    }
                 }
             },
             dismissButton = { TextButton(onClick = { showReplyDialog = false }) { Text(tr(locale, TextKey.CANCEL)) } },
             confirmButton = {
                 TextButton(onClick = {
-                    onCreateReply(replyName, replyText, replyId.toLongOrNull())
+                    onCreateReply(replyName, replyText, selectedReplyId)
+                    selectedReplyId = null
                     showReplyDialog = false
                 }) { Text(tr(locale, TextKey.SAVE)) }
             }
@@ -359,6 +490,11 @@ fun SettingsScreen(
                     androidx.compose.material3.OutlinedTextField(contactName, { contactName = it }, label = { Text(tr(locale, TextKey.NAME_LABEL)) })
                     Spacer(Modifier.size(8.dp))
                     androidx.compose.material3.OutlinedTextField(contactPhone, { contactPhone = it }, label = { Text(tr(locale, TextKey.PHONE_LABEL)) })
+                    Text(
+                        if (locale == AppLocale.AR) "مثال: +96654377556" else "Example: +96654377556",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     Spacer(Modifier.size(8.dp))
                     androidx.compose.material3.OutlinedTextField(contactEmail, { contactEmail = it }, label = { Text(tr(locale, TextKey.EMAIL_OPTIONAL)) })
                 }

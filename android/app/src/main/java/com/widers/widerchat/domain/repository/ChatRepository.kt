@@ -11,4 +11,5 @@ interface ChatRepository {
     suspend fun appendMessage(message: ChatMessage)
     suspend fun updateConversationStatus(conversationId: String, status: ConversationStatus)
     suspend fun addNote(conversationId: String, note: String)
+    suspend fun registerPushToken(token: String, platform: String = "android"): Boolean
 }

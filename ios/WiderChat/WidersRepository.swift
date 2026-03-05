@@ -1,6 +1,24 @@
 import Foundation
 
 final class WidersRepository: ChatRepository {
+    struct ConversationsRequestFilters {
+        let status: String
+        let tag: String
+        let agent: String
+        let rating: String
+        let tap: String
+        let orderBy: String
+
+        static let `default` = ConversationsRequestFilters(
+            status: "all",
+            tag: "all",
+            agent: "all",
+            rating: "all",
+            tap: "all",
+            orderBy: "default"
+        )
+    }
+
     private let api = WidersAPIClient()
     private(set) var session: APISession?
     private(set) var conversationsCache: [Conversation] = []
@@ -12,6 +30,8 @@ final class WidersRepository: ChatRepository {
     private var conversationsHasMore: Bool = true
     private let conversationsPageSize: Int = 30
     private var conversationsLoading: Bool = false
+    private var conversationsFilters: ConversationsRequestFilters = .default
+    private var latestRegisteredPushToken: String?
     private struct MessagePagingState {
         var pageSize: Int = 60
         var nextPage: Int = 1
@@ -61,13 +81,24 @@ final class WidersRepository: ChatRepository {
         return await refreshConversationsFirstPage()
     }
 
-    func refreshConversationsFirstPage() async -> [Conversation] {
+    func refreshConversationsFirstPage(filters: ConversationsRequestFilters = .default) async -> [Conversation] {
         guard let session else { return [] }
+        conversationsFilters = filters
         conversationsNextPage = 1
         conversationsHasMore = true
         conversationsCache = []
         do {
-            let response = try await api.getChatsList(session: session, page: conversationsNextPage, limit: conversationsPageSize)
+            let response = try await api.getChatsList(
+                session: session,
+                page: conversationsNextPage,
+                limit: conversationsPageSize,
+                status: conversationsFilters.status,
+                tag: conversationsFilters.tag,
+                agent: conversationsFilters.agent,
+                rating: conversationsFilters.rating,
+                tap: conversationsFilters.tap,
+                orderBy: conversationsFilters.orderBy
+            )
             let rows = response.firstArray(keys: ["conversations", "chats", "data", "rows", "result"])
             let mapped = mapConversations(rows)
             conversationsCache = mapped
@@ -80,22 +111,39 @@ final class WidersRepository: ChatRepository {
         }
     }
 
-    func loadMoreConversationsPage() async -> [Conversation] {
+    func loadMoreConversationsPage(filters: ConversationsRequestFilters? = nil) async -> [Conversation] {
         guard let session else { return conversationsCache }
+        let activeFilters = filters ?? conversationsFilters
+        if let filters {
+            conversationsFilters = filters
+        }
         if !conversationsHasMore || conversationsLoading { return conversationsCache }
         conversationsLoading = true
         defer { conversationsLoading = false }
         do {
-            let response = try await api.getChatsList(session: session, page: conversationsNextPage, limit: conversationsPageSize)
+            let response = try await api.getChatsList(
+                session: session,
+                page: conversationsNextPage,
+                limit: conversationsPageSize,
+                status: activeFilters.status,
+                tag: activeFilters.tag,
+                agent: activeFilters.agent,
+                rating: activeFilters.rating,
+                tap: activeFilters.tap,
+                orderBy: activeFilters.orderBy
+            )
             let rows = response.firstArray(keys: ["conversations", "chats", "data", "rows", "result"])
             let mapped = mapConversations(rows)
             if mapped.isEmpty {
                 conversationsHasMore = false
                 return conversationsCache
             }
+            let previousCount = conversationsCache.count
             var seen = Set<String>()
-            conversationsCache = (conversationsCache + mapped).filter { seen.insert($0.id).inserted }
-            conversationsHasMore = mapped.count >= conversationsPageSize
+            let merged = (conversationsCache + mapped).filter { seen.insert($0.id).inserted }
+            let addedCount = merged.count - previousCount
+            conversationsCache = merged
+            conversationsHasMore = addedCount > 0 && mapped.count >= conversationsPageSize
             if conversationsHasMore { conversationsNextPage += 1 }
             return conversationsCache
         } catch {
@@ -232,22 +280,12 @@ final class WidersRepository: ChatRepository {
     }
 
     // Full endpoint coverage from Postman collection.
-    func getContactsList() async -> [String: Any]? {
+    func getContactsList(page: Int, limit: Int = 25) async -> [String: Any]? {
         guard let session else { return nil }
-        var mergedRows: [[String: Any]] = []
-        var page = 1
-        let pageSize = 25
-        let maxPages = 120
-        while page <= maxPages {
-            guard let payload = try? await api.getContactsList(session: session, page: page, limit: pageSize) else { break }
-            let rows = payload.firstArray(keys: ["contacts", "data", "rows", "result"])
-            if rows.isEmpty { break }
-            mergedRows.append(contentsOf: rows)
-            if rows.count < pageSize { break }
-            page += 1
-        }
-        var map: [String: String] = [:]
-        for item in mergedRows {
+        guard let payload = try? await api.getContactsList(session: session, page: page, limit: limit) else { return nil }
+        let rows = payload.firstArray(keys: ["contacts", "data", "rows", "result"])
+        var map = contactPhonesById
+        for item in rows {
             guard let id = item.firstString(keys: ["id", "contact_id"]),
                   let phone = item.firstString(keys: ["phone", "wa_id", "number"]),
                   !phone.isEmpty
@@ -255,7 +293,11 @@ final class WidersRepository: ChatRepository {
             map[id] = phone
         }
         contactPhonesById = map
-        return ["contacts": mergedRows]
+        return payload
+    }
+
+    func getContactsList() async -> [String: Any]? {
+        await getContactsList(page: 1, limit: 25)
     }
     func getTemplatesList() async -> [String: Any]? { guard let session else { return nil }; return try? await api.getTemplatesList(session: session) }
     func getTagsList() async -> [String: Any]? { guard let session else { return nil }; return try? await api.getTagsList(session: session) }
@@ -267,6 +309,15 @@ final class WidersRepository: ChatRepository {
     func attachTag(contactId: Int, tagId: Int) async -> [String: Any]? { guard let session else { return nil }; return try? await api.attachTagToChat(session: session, contactId: contactId, tagId: tagId) }
     func detachTag(contactId: Int, tagId: Int) async -> [String: Any]? { guard let session else { return nil }; return try? await api.detachTagFromChat(session: session, contactId: contactId, tagId: tagId) }
     func searchChats(keyword: String, page: Int = 1, limit: Int = 50) async -> [String: Any]? { guard let session else { return nil }; return try? await api.searchChats(session: session, keyword: keyword, page: page, limit: limit) }
+    func searchConversations(keyword: String, page: Int = 1, limit: Int = 50) async -> [Conversation] {
+        guard let payload = await searchChats(keyword: keyword, page: page, limit: limit) else { return [] }
+        let searchRows = payload.firstArray(keys: ["search"])
+        if !searchRows.isEmpty {
+            return mapSearchConversations(searchRows)
+        }
+        let rows = payload.firstArray(keys: ["conversations", "chats", "data", "rows", "result"])
+        return mapConversations(rows)
+    }
     func sendTemplateMessage(contactId: Int, templateId: Int) async -> [String: Any]? { guard let session else { return nil }; return try? await api.sendTemplateMessage(session: session, contactId: contactId, templateId: templateId) }
     func sendFlow(contactId: Int, flowId: Int) async -> [String: Any]? { guard let session else { return nil }; return try? await api.sendFlow(session: session, contactId: contactId, flowId: flowId) }
     func assignAgent(contactId: Int, agent: Int) async -> [String: Any]? { guard let session else { return nil }; return try? await api.assignAgent(session: session, contactId: contactId, agent: agent) }
@@ -279,6 +330,19 @@ final class WidersRepository: ChatRepository {
     func updateContact(contactId: Int, name: String, phone: String, email: String?) async -> [String: Any]? { guard let session else { return nil }; return try? await api.updateContact(session: session, contactId: contactId, name: name, phone: phone, email: email) }
     func createOrUpdateTag(name: String, color: String, tagId: Int?) async -> [String: Any]? { guard let session else { return nil }; return try? await api.createOrUpdateTag(session: session, name: name, color: color, tagId: tagId) }
     func createOrUpdateReply(name: String, text: String, replyId: Int?) async -> [String: Any]? { guard let session else { return nil }; return try? await api.createOrUpdateReply(session: session, name: name, text: text, replyId: replyId) }
+    func registerPushToken(token: String, platform: String) async -> Bool {
+        guard let session else { return false }
+        let normalized = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return false }
+        if latestRegisteredPushToken == normalized { return true }
+        do {
+            _ = try await api.registerPushToken(session: session, pushToken: normalized, platform: platform)
+            latestRegisteredPushToken = normalized
+            return true
+        } catch {
+            return false
+        }
+    }
 
     func currentSessionSnapshot() -> APISession? {
         session
@@ -305,6 +369,7 @@ final class WidersRepository: ChatRepository {
         conversationsNextPage = 1
         conversationsHasMore = false
         conversationsLoading = false
+        latestRegisteredPushToken = nil
     }
 
     func availableWorkspacesSnapshot() -> [WorkspaceOption] {
@@ -324,6 +389,7 @@ final class WidersRepository: ChatRepository {
         conversationsNextPage = 1
         conversationsHasMore = true
         conversationsLoading = false
+        latestRegisteredPushToken = nil
         return true
     }
 
@@ -353,6 +419,9 @@ private func mapConversations(_ rows: [[String: Any]]) -> [Conversation] {
         let tags = parseConversationTags(item)
         let rawLastTime = item.firstString(keys: ["updated_at", "last_reply_at", "last_message_time", "created_at", "time"]) ?? ""
         let satisfaction = parseConversationSatisfaction(item)
+        let isWindowExpired = item.firstBool(
+            keys: ["is_window_expired", "window_expired", "is_24h_expired", "expired_24h", "meta_window_expired"]
+        ) ?? false
         return Conversation(
             id: id,
             customerName: item.firstString(keys: ["name", "customer_name", "contact_name", "title"]) ?? "Customer",
@@ -369,6 +438,7 @@ private func mapConversations(_ rows: [[String: Any]]) -> [Conversation] {
                 return rawUnread
             }(),
             status: statusRaw == "closed" ? .closed : .open,
+            isWindowExpired: isWindowExpired,
             isOnline: item.firstBool(keys: ["is_online", "online"]) ?? false,
             assignedAgentName: assignedAgentName,
             tags: tags
@@ -376,6 +446,38 @@ private func mapConversations(_ rows: [[String: Any]]) -> [Conversation] {
     }
     var seen = Set<String>()
     return mapped.filter { seen.insert($0.id).inserted }
+}
+
+private func mapSearchConversations(_ rows: [[String: Any]]) -> [Conversation] {
+    var seen = Set<String>()
+    return rows.compactMap { item in
+        let contact = item["contact"] as? [String: Any]
+        let id = contact?.firstString(keys: ["id", "contact_id"])
+            ?? item.firstString(keys: ["contact_id", "conversation_id", "id"])
+        guard let id, !id.isEmpty, seen.insert(id).inserted else { return nil }
+        let name = contact?.firstString(keys: ["name"])
+            ?? item.firstString(keys: ["name", "text", "title"])
+            ?? "Customer"
+        let phone = contact?.firstString(keys: ["phone"])
+            ?? item.firstString(keys: ["phone", "wa_id", "number"])
+            ?? ""
+        let text = item.firstString(keys: ["text", "message", "value"]) ?? ""
+        return Conversation(
+            id: id,
+            customerName: name,
+            customerPhone: phone,
+            lastMessage: sanitizeConversationPreview(text),
+            lastMessageTime: "",
+            lastMessageEpochMs: 0,
+            satisfaction: .noRating,
+            unreadCount: 0,
+            status: .open,
+            isWindowExpired: false,
+            isOnline: false,
+            assignedAgentName: nil,
+            tags: []
+        )
+    }
 }
 
 private func parseMessageRows(conversationId: String, rows: [[String: Any]]) -> [ChatMessage] {
@@ -387,6 +489,13 @@ private func parseMessageRows(conversationId: String, rows: [[String: Any]]) -> 
         let kind = item.firstString(keys: ["type", "message_type"]) ?? "text"
         let messageTypeCode = item.firstInt(keys: ["message_type"]) ?? 1
         let isNote = (item.firstInt(keys: ["is_note"]) ?? 0) == 1 || kind == "note"
+        let isSystem = item.firstBool(keys: ["is_system", "system"]) == true ||
+            {
+                let raw = item.firstString(keys: ["type", "message_type", "sender_type", "event_type"])?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased() ?? ""
+                return raw == "system" || raw == "activity" || raw == "event" || raw == "timeline" || raw == "audit"
+            }()
         let media = item.extractMediaPayload()
         let content = item.extractDisplayContent()
         if item.isSkippableEmptyOutgoing(content: content, media: media, messageTypeCode: messageTypeCode) {
@@ -406,8 +515,8 @@ private func parseMessageRows(conversationId: String, rows: [[String: Any]]) -> 
             conversationId: conversationId,
             content: content,
             timestamp: formatApiDateTime(item.firstString(keys: ["created_at", "time", "timestamp"]) ?? ""),
-            type: isNote ? .note : (media != nil || messageTypeCode != 1 ? .media : .text),
-            sender: isAgent ? .agent : .customer,
+            type: isSystem ? .system : (isNote ? .note : (media != nil || messageTypeCode != 1 ? .media : .text)),
+            sender: isSystem ? .agent : (isAgent ? .agent : .customer),
             status: .read,
             noteAuthor: isNote ? "You" : nil,
             mediaUrl: media?.1,
@@ -460,7 +569,11 @@ private func shouldReverseMessageOrder(_ rows: [[String: Any]]) -> Bool {
 
     if let firstTs = first.firstString(keys: ["created_at", "timestamp", "time"]),
        let lastTs = last.firstString(keys: ["created_at", "timestamp", "time"]) {
-        return firstTs > lastTs
+        let firstEpoch = parseApiEpochMs(firstTs)
+        let lastEpoch = parseApiEpochMs(lastTs)
+        if firstEpoch > 0, lastEpoch > 0 {
+            return firstEpoch > lastEpoch
+        }
     }
 
     return false
@@ -520,6 +633,7 @@ private func formatApiDateTime(_ value: String) -> String {
     let output = DateFormatter()
     output.dateFormat = "h:mm a"
     output.locale = Locale(identifier: "en_US_POSIX")
+    output.timeZone = TimeZone(identifier: "Asia/Riyadh")
 
     let inputPatterns = [
         "yyyy-MM-dd'T'HH:mm:ss.SSSSSS'Z'",
@@ -562,6 +676,8 @@ private func parseApiEpochMs(_ value: String) -> Int64 {
 }
 
 private func parseConversationSatisfaction(_ item: [String: Any]) -> ConversationSatisfaction {
+    let lastRatingRaw = (item["last_rating"] as? [String: Any])?.firstString(keys: ["rating", "status", "label", "name"])
+        ?? (item["last_rating_data"] as? [String: Any])?.firstString(keys: ["rating", "status", "label", "name"])
     let top = item.firstString(keys: [
         "satisfaction",
         "satisfaction_status",
@@ -572,7 +688,15 @@ private func parseConversationSatisfaction(_ item: [String: Any]) -> Conversatio
     ])
     let nested = (item["rating"] as? [String: Any])?.firstString(keys: ["status", "label", "name"])
         ?? (item["satisfaction"] as? [String: Any])?.firstString(keys: ["status", "label", "name"])
-    let raw = (nested ?? top ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    let numeric = (item["rating"] as? [String: Any])?.firstInt(keys: ["value", "score", "rating"])
+        ?? (item["satisfaction"] as? [String: Any])?.firstInt(keys: ["value", "score", "rating"])
+        ?? item.firstInt(keys: ["rating", "rating_value"])
+    if let numeric {
+        if numeric >= 4 { return .satisfied }
+        if numeric == 3 { return .neutral }
+        if (1...2).contains(numeric) { return .unsatisfied }
+    }
+    let raw = (lastRatingRaw ?? nested ?? top ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     if raw.isEmpty || raw == "all" || raw == "none" || raw == "null" {
         return .noRating
     }

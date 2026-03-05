@@ -31,6 +31,7 @@ enum MessageType {
     case text
     case media
     case note
+    case system
 }
 
 enum MessageSender {

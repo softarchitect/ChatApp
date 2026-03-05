@@ -51,6 +51,24 @@ struct WorkspaceOption: Identifiable, Equatable {
     var id: Int { companyId }
 }
 
+struct ConversationsServerFilters {
+    let status: String
+    let tag: String
+    let agent: String
+    let rating: String
+    let tap: String
+    let orderBy: String
+
+    static let `default` = ConversationsServerFilters(
+        status: "all",
+        tag: "all",
+        agent: "all",
+        rating: "all",
+        tap: "all",
+        orderBy: "default"
+    )
+}
+
 final class AppViewModel: ObservableObject {
     private enum SessionKeys {
         static let token = "widers.session.token"
@@ -87,12 +105,21 @@ final class AppViewModel: ObservableObject {
     @Published var availableWorkspaces: [WorkspaceOption] = []
     @Published var hasMoreConversations = false
     @Published var isLoadingMoreConversations = false
+    @Published var hasMoreNewConversationContacts = false
+    @Published var isLoadingMoreNewConversationContacts = false
+    @Published var pushDebugInfo: String?
+    @Published var pushDebugRawToken: String?
     private var localOutgoingByConversation: [String: [ChatMessage]] = [:]
     private var chatPollingTask: Task<Void, Never>?
     private var realtimeConversationsRefreshTask: Task<Void, Never>?
     private var realtimeActiveChatRefreshTask: Task<Void, Never>?
     private var pendingNotificationChatId: String?
     private var latestPushToken: String?
+    private var activeConversationFilters: ConversationsServerFilters = .default
+    private var contactsNextPage: Int = 1
+    private var contactsHasMore: Bool = true
+    private let contactsPageSize = 25
+    private var contactsSearchMode = false
     private lazy var realtimeClient = PusherRealtimeClient(
         key: "2a6e447d8a701a4d7fe7",
         cluster: "eu",
@@ -142,6 +169,7 @@ final class AppViewModel: ObservableObject {
                 secureStore.saveString(profileEmail, for: SessionKeys.profileEmail)
                 realtimeClient.connect(companyId: session.companyId)
             }
+            tryRegisterLatestPushToken()
             refreshWorkspaceState()
             launchPostLoginDataWarmup()
             if let pending = pendingNotificationChatId {
@@ -155,6 +183,10 @@ final class AppViewModel: ObservableObject {
         stopChatPolling()
         realtimeClient.disconnect()
         pendingNotificationChatId = nil
+        activeConversationFilters = .default
+        contactsNextPage = 1
+        contactsHasMore = true
+        contactsSearchMode = false
         secureStore.removeValue(for: SessionKeys.token)
         secureStore.removeValue(for: SessionKeys.companyId)
         isLoggedIn = false
@@ -171,6 +203,11 @@ final class AppViewModel: ObservableObject {
         availableWorkspaces = []
         hasMoreConversations = false
         isLoadingMoreConversations = false
+        hasMoreNewConversationContacts = false
+        isLoadingMoreNewConversationContacts = false
+        newConversationContacts = []
+        pushDebugInfo = nil
+        pushDebugRawToken = nil
         availableAgents = []
         availableCustomFields = []
         availableTemplates = []
@@ -219,14 +256,26 @@ final class AppViewModel: ObservableObject {
     }
 
     func backToConversations() {
+        let lastActive = activeChatId
         stopChatPolling()
         realtimeClient.setActiveChat(chatId: nil)
         screen = .conversations
+        activeChatId = nil
+        activeMessages = []
         isChatLoading = false
         hasMoreActiveMessages = false
         isLoadingMoreActiveMessages = false
         Task { @MainActor in
-            conversations = await repository.getConversations()
+            let fetched = await repository.getConversations()
+            if let lastActive {
+                conversations = fetched.map { convo in
+                    var updated = convo
+                    if updated.id == lastActive { updated.unreadCount = 0 }
+                    return updated
+                }
+            } else {
+                conversations = fetched
+            }
         }
     }
 
@@ -244,9 +293,28 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    func refreshConversationsList() async {
+    func refreshConversationsList(filters: ConversationsServerFilters? = nil) async {
+        if let filters {
+            activeConversationFilters = filters
+        }
         if let repo = repository as? WidersRepository {
-            conversations = await repo.refreshConversationsFirstPage()
+            let requestFilters = WidersRepository.ConversationsRequestFilters(
+                status: activeConversationFilters.status,
+                tag: activeConversationFilters.tag,
+                agent: activeConversationFilters.agent,
+                rating: "all",
+                tap: activeConversationFilters.tap,
+                orderBy: activeConversationFilters.orderBy
+            )
+            var loaded = await repo.refreshConversationsFirstPage(filters: requestFilters)
+            if activeConversationFilters.rating != "all" {
+                var pagesLoaded = 1
+                while repo.hasMoreConversationsSnapshot() && pagesLoaded < 25 {
+                    loaded = await repo.loadMoreConversationsPage(filters: requestFilters)
+                    pagesLoaded += 1
+                }
+            }
+            conversations = loaded
             hasMoreConversations = repo.hasMoreConversationsSnapshot()
             isLoadingMoreConversations = repo.isLoadingMoreConversationsSnapshot()
         } else {
@@ -260,7 +328,16 @@ final class AppViewModel: ObservableObject {
         guard let repo = repository as? WidersRepository else { return }
         if isLoadingMoreConversations || !hasMoreConversations { return }
         isLoadingMoreConversations = true
-        conversations = await repo.loadMoreConversationsPage()
+        conversations = await repo.loadMoreConversationsPage(
+            filters: WidersRepository.ConversationsRequestFilters(
+                status: activeConversationFilters.status,
+                tag: activeConversationFilters.tag,
+                agent: activeConversationFilters.agent,
+                rating: "all",
+                tap: activeConversationFilters.tap,
+                orderBy: activeConversationFilters.orderBy
+            )
+        )
         hasMoreConversations = repo.hasMoreConversationsSnapshot()
         isLoadingMoreConversations = repo.isLoadingMoreConversationsSnapshot()
     }
@@ -283,7 +360,8 @@ final class AppViewModel: ObservableObject {
         let normalized = token.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty, normalized != latestPushToken else { return }
         latestPushToken = normalized
-        // Backend token registration endpoint is pending.
+        updatePushDebugStatus(status: "Token received", token: normalized)
+        tryRegisterLatestPushToken()
     }
 
     func switchWorkspace(companyId: Int) {
@@ -305,7 +383,16 @@ final class AppViewModel: ObservableObject {
             hasMoreActiveMessages = false
             isLoadingMoreActiveMessages = false
             screen = .conversations
-            conversations = await repo.refreshConversationsFirstPage()
+            conversations = await repo.refreshConversationsFirstPage(
+                filters: WidersRepository.ConversationsRequestFilters(
+                    status: activeConversationFilters.status,
+                    tag: activeConversationFilters.tag,
+                    agent: activeConversationFilters.agent,
+                    rating: "all",
+                    tap: activeConversationFilters.tap,
+                    orderBy: activeConversationFilters.orderBy
+                )
+            )
             await refreshAvailableTags()
             await refreshAvailableAgents()
             await refreshAvailableTemplates()
@@ -318,6 +405,7 @@ final class AppViewModel: ObservableObject {
             if let session = repository.currentSessionSnapshot() {
                 realtimeClient.connect(companyId: session.companyId)
             }
+            tryRegisterLatestPushToken()
             hasMoreConversations = repo.hasMoreConversationsSnapshot()
             isLoadingMoreConversations = repo.isLoadingMoreConversationsSnapshot()
             isLoading = false
@@ -669,7 +757,10 @@ final class AppViewModel: ObservableObject {
     func updateCurrentContact(name: String, phone: String, email: String?) {
         guard let id = activeChatId, let contactId = Int(id) else { return }
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedPhone = phone.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let trimmedPhone = normalizeInternationalPhone(phone) else {
+            actionStatus = "Failed: phone must be in international format, e.g. +96654377556"
+            return
+        }
         let trimmedEmail = email?.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty, !trimmedPhone.isEmpty else { return }
         Task { @MainActor in
@@ -732,9 +823,13 @@ final class AppViewModel: ObservableObject {
 
     func addContact(name: String, phone: String, email: String?) {
         guard !name.isEmpty, !phone.isEmpty else { return }
+        guard let normalizedPhone = normalizeInternationalPhone(phone) else {
+            actionStatus = "Failed: phone must be in international format, e.g. +96654377556"
+            return
+        }
         Task { @MainActor in
             isActionLoading = true
-            let result = await repository.addContact(name: name, phone: phone, email: email)
+            let result = await repository.addContact(name: name, phone: normalizedPhone, email: email)
             isActionLoading = false
             actionStatus = result == nil ? "Failed: unable to add contact" : "Contact added"
         }
@@ -742,7 +837,10 @@ final class AppViewModel: ObservableObject {
 
     func startNewConversation(name: String, phone: String) {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedPhone = phone.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let trimmedPhone = normalizeInternationalPhone(phone) else {
+            actionStatus = "Failed: phone must be in international format, e.g. +96654377556"
+            return
+        }
         guard !trimmedName.isEmpty, !trimmedPhone.isEmpty else { return }
         Task { @MainActor in
             isActionLoading = true
@@ -777,12 +875,52 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    func updateProfile(name: String, email: String) {
+        let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedName.isEmpty else { return }
+        profileName = normalizedName
+        profileEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     func loadContactsForNewConversation() {
+        contactsSearchMode = false
+        contactsNextPage = 1
+        contactsHasMore = true
         Task { @MainActor in
             contactsLoading = true
             defer { contactsLoading = false }
-            guard let payload = await repository.getContactsList() else { return }
-            newConversationContacts = parseNewConversationContacts(payload)
+            let payload: [String: Any]? = {
+                if let repo = repository as? WidersRepository {
+                    return await repo.getContactsList(page: contactsNextPage, limit: contactsPageSize)
+                }
+                return await repository.getContactsList()
+            }()
+            guard let payload else { return }
+            let parsed = parseNewConversationContacts(payload)
+            contactsHasMore = parsed.count >= contactsPageSize
+            contactsNextPage = contactsHasMore ? 2 : 1
+            newConversationContacts = parsed
+            hasMoreNewConversationContacts = contactsHasMore
+            isLoadingMoreNewConversationContacts = false
+        }
+    }
+
+    func loadMoreContactsForNewConversation() {
+        if contactsSearchMode || !contactsHasMore || contactsLoading || isLoadingMoreNewConversationContacts { return }
+        Task { @MainActor in
+            isLoadingMoreNewConversationContacts = true
+            defer { isLoadingMoreNewConversationContacts = false }
+            guard let repo = repository as? WidersRepository else { return }
+            guard let payload = await repo.getContactsList(page: contactsNextPage, limit: contactsPageSize) else { return }
+            let parsed = parseNewConversationContacts(payload)
+            if parsed.isEmpty {
+                contactsHasMore = false
+            } else {
+                contactsHasMore = parsed.count >= contactsPageSize
+                if contactsHasMore { contactsNextPage += 1 }
+            }
+            newConversationContacts = dedupeContacts(newConversationContacts + parsed)
+            hasMoreNewConversationContacts = contactsHasMore
         }
     }
 
@@ -792,11 +930,15 @@ final class AppViewModel: ObservableObject {
             loadContactsForNewConversation()
             return
         }
+        contactsSearchMode = true
+        contactsHasMore = false
         Task { @MainActor in
             contactsLoading = true
             defer { contactsLoading = false }
             guard let payload = await repository.searchContacts(query: trimmed) else { return }
             newConversationContacts = parseNewConversationContacts(payload)
+            hasMoreNewConversationContacts = false
+            isLoadingMoreNewConversationContacts = false
         }
     }
 
@@ -837,20 +979,15 @@ final class AppViewModel: ObservableObject {
         }
         Task { @MainActor in
             isActionLoading = true
-            let result = await repository.searchChats(keyword: keyword, page: 1, limit: 50)
+            let result = await (repository as? WidersRepository)?.searchConversations(keyword: keyword, page: 1, limit: 50)
             isActionLoading = false
-            guard result != nil else {
-                actionStatus = "Failed: search request"
+            if let result {
+                conversations = result
+                actionStatus = "Search completed"
                 return
             }
-            let ids: Set<String> = {
-                let rows = result?.firstArray(keys: ["data", "chats", "rows", "result"]) ?? []
-                let values = rows.compactMap { $0.firstString(keys: ["contact_id", "id", "conversation_id"]) }
-                return Set(values)
-            }()
             let source = await repository.getConversations()
             conversations = source.filter {
-                ids.contains($0.id) ||
                 $0.customerName.localizedCaseInsensitiveContains(keyword) ||
                 $0.lastMessage.localizedCaseInsensitiveContains(keyword)
             }
@@ -880,6 +1017,14 @@ final class AppViewModel: ObservableObject {
         formatter.dateFormat = "h:mm a"
         formatter.locale = Locale(identifier: locale == .ar ? "ar_SA" : "en_US_POSIX")
         return formatter.string(from: Date())
+    }
+
+    private func normalizeInternationalPhone(_ raw: String) -> String? {
+        let compact = raw.filter { !$0.isWhitespace }
+        guard compact.hasPrefix("+") else { return nil }
+        let digits = String(compact.dropFirst())
+        guard (8...15).contains(digits.count), digits.allSatisfy(\.isNumber) else { return nil }
+        return "+\(digits)"
     }
 
     private func fetchLatestMessages(conversationId: String, resetHistory: Bool = false) async -> [ChatMessage] {
@@ -934,10 +1079,21 @@ final class AppViewModel: ObservableObject {
         realtimeConversationsRefreshTask?.cancel()
         realtimeConversationsRefreshTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 250_000_000)
-            conversations = await repository.getConversations()
             if let repo = repository as? WidersRepository {
+                conversations = await repo.refreshConversationsFirstPage(
+                    filters: WidersRepository.ConversationsRequestFilters(
+                        status: activeConversationFilters.status,
+                        tag: activeConversationFilters.tag,
+                        agent: activeConversationFilters.agent,
+                        rating: "all",
+                        tap: activeConversationFilters.tap,
+                        orderBy: activeConversationFilters.orderBy
+                    )
+                )
                 hasMoreConversations = repo.hasMoreConversationsSnapshot()
                 isLoadingMoreConversations = repo.isLoadingMoreConversationsSnapshot()
+            } else {
+                conversations = await repository.getConversations()
             }
         }
     }
@@ -964,6 +1120,11 @@ final class AppViewModel: ObservableObject {
         }
         var seen = Set<String>()
         return parsed.filter { seen.insert($0.id).inserted }
+    }
+
+    private func dedupeContacts(_ contacts: [NewConversationContact]) -> [NewConversationContact] {
+        var seen = Set<String>()
+        return contacts.filter { seen.insert($0.id).inserted }
     }
 
     private func isHiddenTestContact(name: String, phone: String) -> Bool {
@@ -1141,6 +1302,7 @@ final class AppViewModel: ObservableObject {
                 secureStore.saveString(token, for: SessionKeys.token)
                 secureStore.saveString(String(companyId), for: SessionKeys.companyId)
                 realtimeClient.connect(companyId: companyId)
+                tryRegisterLatestPushToken()
                 refreshWorkspaceState()
                 launchPostLoginDataWarmup()
                 if let pending = pendingNotificationChatId {
@@ -1177,10 +1339,46 @@ final class AppViewModel: ObservableObject {
         restoreSession(token: token, companyId: companyId)
     }
 
+    private func tryRegisterLatestPushToken() {
+        guard let token = latestPushToken else { return }
+        guard isLoggedIn else {
+            updatePushDebugStatus(status: "Waiting for login", token: token)
+            return
+        }
+        Task { @MainActor in
+            updatePushDebugStatus(status: "Registering...", token: token)
+            let ok = await repository.registerPushToken(token: token, platform: "ios")
+            updatePushDebugStatus(status: ok ? "Registered" : "Registration failed", token: token)
+        }
+    }
+
+    private func updatePushDebugStatus(status: String, token: String?) {
+#if DEBUG
+        let masked = token.map(maskPushToken(_:)) ?? "n/a"
+        pushDebugInfo = "Token: \(masked)\nLast attempt: \(nowLabel())\nResult: \(status)"
+        pushDebugRawToken = token
+#endif
+    }
+
+    private func maskPushToken(_ token: String) -> String {
+        let normalized = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalized.count > 10 else { return "***" }
+        return "\(normalized.prefix(6))...\(normalized.suffix(4))"
+    }
+
     private func launchPostLoginDataWarmup() {
         Task { @MainActor in
             if let repo = repository as? WidersRepository {
-                conversations = await repo.refreshConversationsFirstPage()
+                conversations = await repo.refreshConversationsFirstPage(
+                    filters: WidersRepository.ConversationsRequestFilters(
+                        status: activeConversationFilters.status,
+                        tag: activeConversationFilters.tag,
+                        agent: activeConversationFilters.agent,
+                        rating: "all",
+                        tap: activeConversationFilters.tap,
+                        orderBy: activeConversationFilters.orderBy
+                    )
+                )
                 hasMoreConversations = repo.hasMoreConversationsSnapshot()
                 isLoadingMoreConversations = repo.isLoadingMoreConversationsSnapshot()
             } else {
