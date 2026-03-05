@@ -246,7 +246,8 @@ final class AppViewModel: ObservableObject {
             let remote = await fetchLatestMessages(conversationId: id, resetHistory: true)
             guard self.activeChatId == id else { return }
             activeMessages = mergeWithLocalOutgoing(conversationId: id, remote: remote)
-            conversations = await repository.getConversations().map { convo in
+            let latestConversations = await repository.getConversations()
+            conversations = latestConversations.map { convo in
                 var updated = convo
                 if updated.id == id { updated.unreadCount = 0 }
                 return updated

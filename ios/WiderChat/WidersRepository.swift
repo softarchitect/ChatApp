@@ -30,7 +30,14 @@ final class WidersRepository: ChatRepository {
     private var conversationsHasMore: Bool = true
     private let conversationsPageSize: Int = 30
     private var conversationsLoading: Bool = false
-    private var conversationsFilters: ConversationsRequestFilters = .default
+    private var conversationsFilters: ConversationsRequestFilters = ConversationsRequestFilters(
+        status: "all",
+        tag: "all",
+        agent: "all",
+        rating: "all",
+        tap: "all",
+        orderBy: "default"
+    )
     private var latestRegisteredPushToken: String?
     private struct MessagePagingState {
         var pageSize: Int = 60
@@ -81,7 +88,16 @@ final class WidersRepository: ChatRepository {
         return await refreshConversationsFirstPage()
     }
 
-    func refreshConversationsFirstPage(filters: ConversationsRequestFilters = .default) async -> [Conversation] {
+    func refreshConversationsFirstPage(
+        filters: ConversationsRequestFilters = ConversationsRequestFilters(
+            status: "all",
+            tag: "all",
+            agent: "all",
+            rating: "all",
+            tap: "all",
+            orderBy: "default"
+        )
+    ) async -> [Conversation] {
         guard let session else { return [] }
         conversationsFilters = filters
         conversationsNextPage = 1

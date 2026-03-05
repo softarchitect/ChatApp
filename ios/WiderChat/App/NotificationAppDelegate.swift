@@ -17,12 +17,6 @@ final class NotificationAppDelegate: NSObject, UIApplicationDelegate, UNUserNoti
         Messaging.messaging().delegate = self
         UNUserNotificationCenter.current().delegate = self
         requestNotificationAuthorization(application)
-        if
-            let remotePayload = launchOptions?[.remoteNotification] as? [AnyHashable: Any],
-            let contactId = PushNotificationBridge.extractChatId(from: remotePayload)
-        {
-            PushNotificationBridge.postOpenChat(contactId: contactId)
-        }
         return true
     }
 
@@ -38,14 +32,30 @@ final class NotificationAppDelegate: NSObject, UIApplicationDelegate, UNUserNoti
         // Keep silent; app should continue if APNS registration fails.
     }
 
-    func application(
+    nonisolated func application(
         _ application: UIApplication,
         didReceiveRemoteNotification userInfo: [AnyHashable: Any]
     ) async -> UIBackgroundFetchResult {
+        // Kept for backward compatibility where async delegate is invoked.
         if let contactId = PushNotificationBridge.extractChatId(from: userInfo) {
-            PushNotificationBridge.postOpenChat(contactId: contactId)
+            await MainActor.run {
+                PushNotificationBridge.postOpenChat(contactId: contactId)
+            }
         }
         return .newData
+    }
+
+    nonisolated func application(
+        _ application: UIApplication,
+        didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+        fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
+    ) {
+        if let contactId = PushNotificationBridge.extractChatId(from: userInfo) {
+            Task { @MainActor in
+                PushNotificationBridge.postOpenChat(contactId: contactId)
+            }
+        }
+        completionHandler(.newData)
     }
 
     func userNotificationCenter(
