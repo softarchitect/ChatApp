@@ -8,15 +8,6 @@ final class WidersRepository: ChatRepository {
         let rating: String
         let tap: String
         let orderBy: String
-
-        static let `default` = ConversationsRequestFilters(
-            status: "all",
-            tag: "all",
-            agent: "all",
-            rating: "all",
-            tap: "all",
-            orderBy: "default"
-        )
     }
 
     private let api = WidersAPIClient()

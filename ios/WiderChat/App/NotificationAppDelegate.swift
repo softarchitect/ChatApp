@@ -34,23 +34,10 @@ final class NotificationAppDelegate: NSObject, UIApplicationDelegate, UNUserNoti
 
     nonisolated func application(
         _ application: UIApplication,
-        didReceiveRemoteNotification userInfo: [AnyHashable: Any]
-    ) async -> UIBackgroundFetchResult {
-        // Kept for backward compatibility where async delegate is invoked.
-        if let contactId = PushNotificationBridge.extractChatId(from: userInfo) {
-            await MainActor.run {
-                PushNotificationBridge.postOpenChat(contactId: contactId)
-            }
-        }
-        return .newData
-    }
-
-    nonisolated func application(
-        _ application: UIApplication,
         didReceiveRemoteNotification userInfo: [AnyHashable: Any],
         fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
     ) {
-        if let contactId = PushNotificationBridge.extractChatId(from: userInfo) {
+        if let contactId = extractContactId(from: userInfo) {
             Task { @MainActor in
                 PushNotificationBridge.postOpenChat(contactId: contactId)
             }
@@ -64,7 +51,7 @@ final class NotificationAppDelegate: NSObject, UIApplicationDelegate, UNUserNoti
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
         let userInfo = notification.request.content.userInfo
-        if let contactId = PushNotificationBridge.extractChatId(from: userInfo) {
+        if let contactId = extractContactId(from: userInfo) {
             PushNotificationBridge.postOpenChat(contactId: contactId)
         }
         completionHandler([.banner, .sound, .badge])
@@ -76,7 +63,7 @@ final class NotificationAppDelegate: NSObject, UIApplicationDelegate, UNUserNoti
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         let userInfo = response.notification.request.content.userInfo
-        if let contactId = PushNotificationBridge.extractChatId(from: userInfo) {
+        if let contactId = extractContactId(from: userInfo) {
             PushNotificationBridge.postOpenChat(contactId: contactId)
         }
         completionHandler()
@@ -94,5 +81,19 @@ final class NotificationAppDelegate: NSObject, UIApplicationDelegate, UNUserNoti
     func messaging(_ messaging: Messaging, didReceiveRegistrationToken fcmToken: String?) {
         guard let token = fcmToken else { return }
         PushNotificationBridge.postToken(token)
+    }
+
+    private func extractContactId(from userInfo: [AnyHashable: Any]) -> String? {
+        let keys = ["contact_id", "chat_id", "conversation_id", "chatId", "conversationId"]
+        for key in keys {
+            if let value = userInfo[key] as? String {
+                let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !normalized.isEmpty { return normalized }
+            }
+            if let number = userInfo[key] as? NSNumber {
+                return number.stringValue
+            }
+        }
+        return nil
     }
 }
