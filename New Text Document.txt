@@ -1,0 +1,425 @@
+Widers Mobile App – Bug Fixes & Required Modifications (Phase 2)
+
+Below is the list of issues and required improvements that must be fixed in the current mobile app version.
+
+Please review carefully and implement accordingly.
+
+⸻
+
+1. Voice Recording Issue
+
+Problem:
+• Voice recording appears as sent inside the app.
+• The recipient does NOT receive the audio.
+• Two icons appear:
+• One for recording
+• Another below labeled “Audio” (unclear why both exist).
+
+Required Fix:
+• Fix audio upload so it is properly sent via API and delivered to recipient.
+• Remove duplicate audio UI elements.
+• Replace emoji button with microphone button.
+• Behavior:
+• Press & hold to record.
+• Release to stop and send.
+• No separate audio button.
+• Clean WhatsApp-like behavior.
+
+⸻
+
+2. Chat Opens in Middle
+
+Problem:
+Opening a conversation scrolls to middle of chat.
+
+Required Fix:
+• Chat must automatically scroll to bottom (latest message) when opened.
+
+⸻
+
+3. No Real-Time Update Inside Chat
+
+Problem:
+If user is inside a chat and new messages arrive:
+• Messages do not appear.
+• Only visible after exiting and re-entering.
+
+Required Fix:
+• Real-time update inside open chat.
+• Messages must appear instantly.
+• Implement WebSocket or polling if needed.
+
+⸻
+
+4. Pagination / Old Data Not Loading
+
+Problem:
+• Old conversations are not loading.
+• Old messages are not loading.
+• There is a limit and no further fetching occurs.
+
+Required Fix:
+• Implement proper pagination.
+• Load more conversations when scrolling.
+• Load older messages when scrolling up inside chat.
+• Must follow API pagination.
+• No hard limit.
+
+⸻
+
+5. Contacts Pagination
+
+Problem:
+Contacts list stops after first page.
+
+Required Fix:
+• Load 25 contacts per page (or per API limit).
+• Fetch more when scrolling.
+• Same logic as conversations.
+• Prevent server overload with proper pagination.
+
+⸻
+
+6. Copy & Paste Not Working
+
+Problem:
+User cannot copy or paste messages.
+
+Required Fix:
+• Enable long press → Copy message.
+• Enable paste in input field.
+
+⸻
+
+7. Clickable Links
+
+Problem:
+Links, phone numbers, and emails appear as plain text.
+
+Required Fix:
+• URLs must be clickable.
+• Phone numbers clickable.
+• Emails clickable.
+• Same behavior as WhatsApp.
+
+⸻
+
+8. Media Type Labels
+
+Media labels must display correctly:
+• Image
+• Video
+• Audio
+• Document
+
+Proper naming and consistent formatting.
+
+⸻
+
+9. Multiple Tags Display
+
+Problem:
+Only one tag appears.
+
+Required Fix:
+• Display at least 2–3 tags depending on screen width.
+• Proper wrapping based on device size.
+
+⸻
+
+10. Push Notifications Not Working
+
+Push notifications are not functioning.
+
+Required Fix:
+• Implement FCM (Android)
+• Implement APNS (iOS)
+• Must open correct conversation when tapped.
+
+⸻
+
+11. 24-Hour Window Meta Policy
+
+Meta policy:
+• Conversation closes 24 hours after last customer message.
+• Only template messages allowed afterward.
+• If customer replies → conversation reopens automatically.
+
+Required:
+• Display expired 24h window clearly in RED.
+• Show warning banner:
+“24-hour window expired. You must send a template.”
+• Auto reopen conversation when customer replies.
+
+⸻
+
+12. Shortcut Commands Not Implemented
+
+Must implement inside message input:
+• “/” → show quick replies
+• “@” → show agents list (assign / unassign)
+• “#” → show tags list (add tag)
+
+Same behavior as web version.
+
+⸻
+
+13. Sync Custom Field Incorrect
+
+Problem:
+Shows:
+• Field ID
+• Field value
+
+This is wrong.
+
+Required Fix:
+• Display full user custom fields exactly as web version.
+• Only allow updating field value.
+• Do not show raw IDs.
+
+⸻
+
+14. Remove Call Button
+
+Top call button must be removed.
+We do not provide call service.
+
+⸻
+
+15. Disable Delete Conversation
+
+Delete conversation option must be removed or disabled.
+We do NOT allow deleting conversations.
+
+⸻
+
+16. Scroll Position Lost
+
+Problem:
+If I scroll down in conversations,
+Open a chat,
+Return → it scrolls back to top.
+
+Required Fix:
+• Preserve scroll position.
+• Preserve applied filters.
+
+⸻
+
+17. Phone Field Validation
+
+When adding/updating contact:
+• Add placeholder example:
++96654377556
+• Must require international format.
+• Remove spaces automatically.
+• Accept copy/paste.
+
+⸻
+
+18. Missing Filters
+
+We need these filters:
+
+Assignment Filter:
+• My conversations
+• Unassigned
+• All
+
+Sorting:
+• Latest conversations
+• Created (Oldest/Newest)
+• Updated (Oldest/Newest)
+
+Satisfaction Filter:
+• Satisfied
+• Neutral
+• Unsatisfied
+• No rating
+
+Must display total result count after applying filter.
+
+⸻
+
+19. Pull to Refresh + Infinite Scroll
+
+Must implement:
+• Pull down to refresh → fetch latest data from API.
+• Infinite scroll at bottom → load next page.
+• Must respect selected filters.
+• Applies to:
+• Conversations
+• Contacts
+
+⸻
+
+20. Tag Selection Feedback
+
+Problem:
+When selecting a tag:
+• No visual confirmation.
+• Tags not hidden after selection.
+
+Required Fix:
+• Provide clear confirmation.
+• Hide tag selector after applying.
+• Show success state.
+
+⸻
+
+21. Account Switching & Profile Editing Missing
+
+In settings:
+• No account switching option.
+• No profile editing option.
+• Must allow:
+• Switch workspace
+• Edit profile information
+
+⸻
+
+22. Tag Color Issue
+
+When adding tag:
+• Only color code appears (e.g. #FFFFF).
+
+Required:
+• Display actual colored badge.
+• Proper color rendering.
+
+⸻
+
+General Requirements
+• All fixes must follow API structure.
+• Maintain WhatsApp-like UX.
+• Maintain Widers branding.
+• Stable builds required.
+• All changes must be tested before submission.
+
+⸻
+
+Please confirm:
+1. Estimated time to fix all items.
+2. Whether any new API endpoints are required.
+3. If anything needs clarification.
+2:12 PM
+
+23. Conversation Activity Logs (System Events Inside Chat)
+
+Requirement
+
+All important conversation updates must be displayed inside the chat screen as system messages (timeline events).
+
+These must appear as non-editable, system-generated entries inside the conversation thread.
+
+Examples of events that must be shown:
+• Ahmed added a tag.
+• A tag was removed by Ahmed.
+• Sultan assigned the conversation to you.
+• The manager removed the assignment.
+• Sultan updated a variable.
+• Ahmed closed the conversation.
+• Conversation reopened automatically.
+• Template was sent.
+• Flow was triggered.
+
+Display Requirements
+• Show as system message (centered or styled differently from user messages).
+• Light grey background or subtle system style.
+• Smaller font.
+• Include:
+• Actor name
+• Action description
+• Timestamp
+
+Example format:
+
+Ahmed added tag: VIP
+Sultan assigned this conversation to you
+Manager removed assignment
+Variable “Interested” updated by Sultan
+Ahmed closed the conversation
+
+These must be fetched from API or logged via backend events.
+
+If backend does not provide these events:
+→ API must be added to return conversation activity logs.
+
+⸻
+
+24. Display Customer Satisfaction Status in Chat Header
+
+We require the satisfaction level to be displayed at the top of each conversation.
+
+Location:
+• In chat header, next to customer name.
+
+Possible statuses:
+• 😊 Satisfied
+• 😐 Neutral
+• 😠 Unsatisfied
+• ⚪ No rating
+
+Display:
+• Emoji + text
+• Clear visible badge next to customer name
+• Must update dynamically if satisfaction changes.
+
+Data source:
+• Must come from backend (manual rating or AI-generated rating).
+
+If no rating exists:
+Display “No Rating”.
+
+⸻
+
+Important Implementation Notes
+• System events must not be deletable.
+• They must be part of conversation history.
+• They must scroll normally with chat.
+• They must not be mistaken for customer messages.
+• Header satisfaction must refresh in real-time.
+2:19 PM
+
+For the point 11. 24-Hour Window Meta Policy
+This the picture description
+
+
+
+And for the point 23 the last one
+This is picture description for chat updates
+
+
+
+
+Tabs: Rename and restructure tabs to "All," "My Conversations," and "Unassigned."
+
+Filters: The "Read" filter must allow status-based filtering (open, closed, muted, etc.).
+
+Assignment Filter: Use agent-based filtering instead of "My Conversations" and "Unassigned."
+
+Conversation List: The loading spinner should stop once all messages are fully loaded.
+
+Conversation Rating: Although the API supports rating, it never displays properly.
+
+Search: Search only works in loaded conversations; it must work via API across all conversations.
+
+Update Action: Pressing update with no internet causes the app to crash.
+
+Tag Update: When updating a tag, show a list of available tags so the customer selects one and the system captures the ID.
+
+Quick Reply Update: Similarly, show a list of existing quick replies so the customer selects one and the system captures the ID.
+
+Messages with Buttons: The app incorrectly displays an audio message placeholder even when none exists.
+
+Message Display: Messages are shown in the wrong order; the sequence is incorrect.
+
+Timestamps: The system uses GMT time, but it should be Asia/Riyadh.
+
+Conversation Display: The "Last Seen" or "Last Viewed" field appears, but the system doesn't support it via the API, so it should not appear.
+
+Images: Image previews do not support zoom; this needs to be added.
+
+Unread Count: The unread message count remains stuck after opening the conversation and returning.
+Custom Field Editing: The custom field was applied incorrectly. A list of available custom fields should be displayed for editing, along with a default value in the contact fields, and then the request should be sent.

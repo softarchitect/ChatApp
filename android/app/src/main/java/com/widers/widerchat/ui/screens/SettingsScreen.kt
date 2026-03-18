@@ -47,6 +47,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -56,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import com.widers.widerchat.BuildConfig
 import com.widers.widerchat.core.TextKey
 import com.widers.widerchat.core.tr
+import com.widers.widerchat.data.notifications.NotificationTestSender
 import com.widers.widerchat.domain.model.AppLocale
 import com.widers.widerchat.domain.model.AvailableReply
 import com.widers.widerchat.domain.model.AvailableTag
@@ -98,6 +100,7 @@ fun SettingsScreen(
     var showTagDialog by remember { mutableStateOf(false) }
     var showReplyDialog by remember { mutableStateOf(false) }
     var showContactDialog by remember { mutableStateOf(false) }
+    var showTestPushDialog by remember { mutableStateOf(false) }
     var tagName by remember { mutableStateOf("") }
     var tagColor by remember { mutableStateOf("#ffffff") }
     var selectedTagId by remember { mutableStateOf<Long?>(null) }
@@ -107,6 +110,7 @@ fun SettingsScreen(
     var contactName by remember { mutableStateOf("") }
     var contactPhone by remember { mutableStateOf("") }
     var contactEmail by remember { mutableStateOf("") }
+    var testPushContactId by remember { mutableStateOf("") }
     val accountName = profileName.trim().ifBlank { tr(locale, TextKey.ACCOUNT) }
     val accountEmail = profileEmail
         .trim()
@@ -120,6 +124,7 @@ fun SettingsScreen(
     var profileNameInput by remember { mutableStateOf(accountName) }
     var profileEmailInput by remember { mutableStateOf(accountEmail.orEmpty()) }
     var tokenCopied by remember { mutableStateOf(false) }
+    val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
 
     LaunchedEffect(tokenCopied) {
@@ -208,6 +213,15 @@ fun SettingsScreen(
                 FlatToggleRow(icon = { Icon(Icons.Outlined.NotificationsActive, null, tint = Color.White) }, iconBg = Color(0xFFF43F5E), label = tr(locale, TextKey.PUSH_NOTIFICATIONS), checked = pushEnabled) { pushEnabled = it }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
                 FlatToggleRow(icon = { Icon(Icons.AutoMirrored.Outlined.VolumeUp, null, tint = Color.White) }, iconBg = Color(0xFFF59E0B), label = tr(locale, TextKey.SOUND_ALERTS), checked = soundEnabled) { soundEnabled = it }
+                if (BuildConfig.DEBUG) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
+                    FlatRow(
+                        icon = { Icon(Icons.Outlined.NotificationsActive, null, tint = Color.White) },
+                        iconBg = Color(0xFF10B981),
+                        label = if (locale == AppLocale.AR) "إرسال إشعار تجريبي" else "Send test notification",
+                        onClick = { showTestPushDialog = true }
+                    )
+                }
             }
             if (BuildConfig.DEBUG && !pushDebugInfo.isNullOrBlank()) {
                 Text(
@@ -505,6 +519,52 @@ fun SettingsScreen(
                     onAddContact(contactName, contactPhone, contactEmail.ifBlank { null })
                     showContactDialog = false
                 }) { Text(tr(locale, TextKey.ADD)) }
+            }
+        )
+    }
+
+    if (showTestPushDialog) {
+        AlertDialog(
+            onDismissRequest = { showTestPushDialog = false },
+            title = {
+                Text(if (locale == AppLocale.AR) "اختبار الإشعارات" else "Notification test")
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        if (locale == AppLocale.AR) {
+                            "أدخل contact_id اختياريًا لفتح محادثة محددة عند الضغط على الإشعار."
+                        } else {
+                            "Optionally enter contact_id to deep-link into a chat when tapping the notification."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    androidx.compose.material3.OutlinedTextField(
+                        value = testPushContactId,
+                        onValueChange = { testPushContactId = it },
+                        singleLine = true,
+                        label = {
+                            Text(if (locale == AppLocale.AR) "contact_id (اختياري)" else "contact_id (optional)")
+                        }
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showTestPushDialog = false }) { Text(tr(locale, TextKey.CANCEL)) }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        NotificationTestSender.sendLocalTestNotification(
+                            context = context,
+                            contactId = testPushContactId.trim().ifBlank { null }
+                        )
+                        showTestPushDialog = false
+                    }
+                ) {
+                    Text(if (locale == AppLocale.AR) "إرسال" else "Send")
+                }
             }
         )
     }

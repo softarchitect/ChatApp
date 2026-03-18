@@ -13,6 +13,14 @@ struct LegacyAppRootView: View {
                 MainShellView(vm: vm)
             }
         }
+        .onAppear {
+            if let pendingChatId = PushNotificationBridge.consumePendingChatId() {
+                vm.onNotificationOpenChat(chatId: pendingChatId)
+            }
+            if let pendingToken = PushNotificationBridge.consumePendingToken() {
+                vm.onPushTokenReceived(token: pendingToken)
+            }
+        }
         .environment(\.layoutDirection, vm.locale == .ar ? .rightToLeft : .leftToRight)
         .preferredColorScheme(vm.darkMode ? .dark : .light)
         .onReceive(NotificationCenter.default.publisher(for: PushNotificationBridge.didOpenChat)) { note in

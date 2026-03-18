@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "223352822096",
+    "project_id": "widers-chat-app",
+    "storage_bucket": "widers-chat-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:223352822096:android:a8a8c31e1be9d93645b455",
+        "android_client_info": {
+          "package_name": "net.widers"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBR122I3A6KiWsExtrgpDDFnLaJyxOSCT0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

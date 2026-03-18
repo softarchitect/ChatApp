@@ -109,7 +109,11 @@ final class WidersRepository: ChatRepository {
             let rows = response.firstArray(keys: ["conversations", "chats", "data", "rows", "result"])
             let mapped = mapConversations(rows)
             conversationsCache = mapped
-            conversationsHasMore = mapped.count >= conversationsPageSize
+            conversationsHasMore = hasMorePages(
+                response: response,
+                fetchedCount: mapped.count,
+                pageSize: conversationsPageSize
+            )
             conversationsNextPage = conversationsHasMore ? 2 : 1
             return conversationsCache
         } catch {
@@ -145,12 +149,14 @@ final class WidersRepository: ChatRepository {
                 conversationsHasMore = false
                 return conversationsCache
             }
-            let previousCount = conversationsCache.count
             var seen = Set<String>()
             let merged = (conversationsCache + mapped).filter { seen.insert($0.id).inserted }
-            let addedCount = merged.count - previousCount
             conversationsCache = merged
-            conversationsHasMore = addedCount > 0 && mapped.count >= conversationsPageSize
+            conversationsHasMore = hasMorePages(
+                response: response,
+                fetchedCount: mapped.count,
+                pageSize: conversationsPageSize
+            )
             if conversationsHasMore { conversationsNextPage += 1 }
             return conversationsCache
         } catch {
@@ -170,20 +176,46 @@ final class WidersRepository: ChatRepository {
         let existing = messagePagingByConversation[conversationId]
         let pageSize = existing?.pageSize ?? 60
         do {
-            let response = try await api.getChatMessages(
-                session: session,
-                contactId: contactId,
-                page: 1,
-                limit: pageSize
-            )
-            let rows = response.firstArray(keys: ["messages", "data", "rows", "result"])
-            let parsed = parseMessageRows(conversationId: conversationId, rows: rows)
             let previous = resetLoaded ? [] : (existing?.loaded ?? [])
-            let merged = dedupeMessages(previous + parsed)
+            var merged = previous
+            var cursorAfterId = previous.compactMap { Int($0.id) }.max()
+
+            if previous.isEmpty {
+                let seedResponse = try await api.getChatMessages(
+                    session: session,
+                    contactId: contactId,
+                    page: 1,
+                    limit: pageSize
+                )
+                let seedRows = seedResponse.firstArray(keys: ["messages", "data", "rows", "result"])
+                let seedParsed = parseMessageRows(conversationId: conversationId, rows: seedRows)
+                merged = dedupeMessages(seedParsed)
+                cursorAfterId = maxNumericMessageId(in: merged)
+            }
+
+            while let afterId = cursorAfterId {
+                let response = try await api.getChatMessages(
+                    session: session,
+                    contactId: contactId,
+                    afterId: afterId
+                )
+                let rows = response.firstArray(keys: ["messages", "data", "rows", "result"])
+                let parsed = parseMessageRows(conversationId: conversationId, rows: rows)
+                if parsed.isEmpty { break }
+                let nextMerged = dedupeMessages(merged + parsed)
+                let nextCursor = maxNumericMessageId(in: nextMerged)
+                if nextCursor == nil || nextCursor == cursorAfterId {
+                    merged = nextMerged
+                    break
+                }
+                merged = nextMerged
+                cursorAfterId = nextCursor
+            }
+
             messagePagingByConversation[conversationId] = MessagePagingState(
                 pageSize: pageSize,
-                nextPage: parsed.count >= pageSize ? 2 : 1,
-                hasMore: parsed.count >= pageSize,
+                nextPage: 1,
+                hasMore: false,
                 isLoading: false,
                 loaded: merged
             )
@@ -194,38 +226,11 @@ final class WidersRepository: ChatRepository {
     }
 
     func loadOlderMessagesPage(conversationId: String) async -> [ChatMessage] {
-        guard let session, let contactId = Int(conversationId) else { return [] }
+        guard messagePagingByConversation[conversationId] != nil else { return [] }
         var state = messagePagingByConversation[conversationId] ?? MessagePagingState()
-        if !state.hasMore || state.isLoading { return state.loaded }
-        state.isLoading = true
+        state.hasMore = false
         messagePagingByConversation[conversationId] = state
-        defer {
-            var latest = messagePagingByConversation[conversationId] ?? state
-            latest.isLoading = false
-            messagePagingByConversation[conversationId] = latest
-        }
-        do {
-            let response = try await api.getChatMessages(
-                session: session,
-                contactId: contactId,
-                page: state.nextPage,
-                limit: state.pageSize
-            )
-            let rows = response.firstArray(keys: ["messages", "data", "rows", "result"])
-            let parsed = parseMessageRows(conversationId: conversationId, rows: rows)
-            if parsed.isEmpty {
-                state.hasMore = false
-                messagePagingByConversation[conversationId] = state
-                return state.loaded
-            }
-            state.loaded = dedupeMessages(parsed + state.loaded)
-            state.hasMore = parsed.count >= state.pageSize
-            if state.hasMore { state.nextPage += 1 }
-            messagePagingByConversation[conversationId] = state
-            return state.loaded
-        } catch {
-            return messagePagingByConversation[conversationId]?.loaded ?? []
-        }
+        return state.loaded
     }
 
     func sendMessage(conversationId: String, text: String) async -> Bool {
@@ -418,6 +423,40 @@ final class WidersRepository: ChatRepository {
 
 }
 
+private func hasMorePages(
+    response: [String: Any],
+    fetchedCount: Int,
+    pageSize: Int
+) -> Bool {
+    if let (currentPage, totalPages) = extractPagination(response: response) {
+        return currentPage < totalPages
+    }
+    return fetchedCount >= pageSize
+}
+
+private func extractPagination(response: [String: Any]) -> (Int, Int)? {
+    if let direct = extractPagination(from: response) {
+        return direct
+    }
+    if let dataObject = response["data"] as? [String: Any], let nested = extractPagination(from: dataObject) {
+        return nested
+    }
+    if let meta = response["meta"] as? [String: Any], let nested = extractPagination(from: meta) {
+        return nested
+    }
+    if let pagination = response["pagination"] as? [String: Any], let nested = extractPagination(from: pagination) {
+        return nested
+    }
+    return nil
+}
+
+private func extractPagination(from object: [String: Any]) -> (Int, Int)? {
+    let currentPage = object.firstInt(keys: ["current_page", "page"])
+    let totalPages = object.firstInt(keys: ["total_pages", "last_page", "pages_count"])
+    guard let currentPage, let totalPages, totalPages > 0 else { return nil }
+    return (currentPage, totalPages)
+}
+
 private func mapConversations(_ rows: [[String: Any]]) -> [Conversation] {
     let mapped: [Conversation] = rows.compactMap { item in
         guard let id = item.firstString(keys: ["contact_id", "id", "conversation_id"]) else { return nil }
@@ -538,6 +577,10 @@ private func dedupeMessages(_ items: [ChatMessage]) -> [ChatMessage] {
     return items.filter { seen.insert($0.id).inserted }
 }
 
+private func maxNumericMessageId(in messages: [ChatMessage]) -> Int? {
+    messages.compactMap { Int($0.id) }.max()
+}
+
 private func parseWorkspaceOptions(response: [String: Any], fallbackCompanyId: Int) -> [WorkspaceOption] {
     var result: [WorkspaceOption] = []
     func addWorkspace(_ item: [String: Any]?) {
@@ -637,10 +680,15 @@ private func formatApiDateTime(_ value: String) -> String {
     let raw = value.trimmingCharacters(in: .whitespacesAndNewlines)
     if raw.isEmpty { return value }
 
-    let output = DateFormatter()
-    output.dateFormat = "h:mm a"
-    output.locale = Locale(identifier: "en_US_POSIX")
-    output.timeZone = TimeZone(identifier: "Asia/Riyadh")
+    let timeOnlyOutput = DateFormatter()
+    timeOnlyOutput.dateFormat = "h:mm a"
+    timeOnlyOutput.locale = Locale(identifier: "en_US_POSIX")
+    timeOnlyOutput.timeZone = TimeZone(identifier: "Asia/Riyadh")
+
+    let fullOutput = DateFormatter()
+    fullOutput.dateFormat = "MMM d, h:mm a"
+    fullOutput.locale = Locale(identifier: "en_US_POSIX")
+    fullOutput.timeZone = TimeZone(identifier: "Asia/Riyadh")
 
     let inputPatterns = [
         "yyyy-MM-dd'T'HH:mm:ss.SSSSSS'Z'",
@@ -655,7 +703,12 @@ private func formatApiDateTime(_ value: String) -> String {
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.dateFormat = pattern
         if let date = formatter.date(from: raw) {
-            return output.string(from: date)
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = TimeZone(identifier: "Asia/Riyadh") ?? .current
+            if calendar.isDateInToday(date) {
+                return timeOnlyOutput.string(from: date)
+            }
+            return fullOutput.string(from: date)
         }
     }
     return value

@@ -309,10 +309,8 @@ final class AppViewModel: ObservableObject {
             )
             var loaded = await repo.refreshConversationsFirstPage(filters: requestFilters)
             if activeConversationFilters.rating != "all" {
-                var pagesLoaded = 1
-                while repo.hasMoreConversationsSnapshot() && pagesLoaded < 25 {
+                while repo.hasMoreConversationsSnapshot() {
                     loaded = await repo.loadMoreConversationsPage(filters: requestFilters)
-                    pagesLoaded += 1
                 }
             }
             conversations = loaded

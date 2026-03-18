@@ -1155,10 +1155,8 @@ class AppViewModel(
             val conversations = if (repo != null) {
                 var loaded = repo.refreshConversationsFirstPage(requestFilters)
                 if (activeConversationFilters.rating != "all") {
-                    var pagesLoaded = 1
-                    while (repo.hasMoreConversationsSnapshot() && pagesLoaded < 25) {
+                    while (repo.hasMoreConversationsSnapshot()) {
                         loaded = repo.loadMoreConversationsPage(requestFilters)
-                        pagesLoaded += 1
                     }
                 }
                 loaded

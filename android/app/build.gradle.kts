@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.google.services)
 }
 
 android {
@@ -18,7 +19,7 @@ android {
         .orElse("eu")
 
     defaultConfig {
-        applicationId = "com.widers.widerchat"
+        applicationId = "net.widers"
         minSdk = 24
         targetSdk = 36
         versionCode = 1

@@ -120,7 +120,11 @@ class NetworkChatRepository(
             ?: emptyArrayFrom(response)
         val parsed = parseConversationRows(pageItems)
         cacheConversations = parsed.distinctBy { it.id }
-        conversationsHasMore = parsed.size >= conversationsPageSize
+        conversationsHasMore = hasMorePages(
+            response = response,
+            fetchedCount = parsed.size,
+            pageSize = conversationsPageSize
+        )
         conversationsNextPage = if (conversationsHasMore) 2 else 1
         return cacheConversations
     }
@@ -154,11 +158,13 @@ class NetworkChatRepository(
                 conversationsHasMore = false
                 return cacheConversations
             }
-            val previousSize = cacheConversations.size
             val merged = (cacheConversations + parsed).distinctBy { it.id }
-            val addedCount = merged.size - previousSize
             cacheConversations = merged
-            conversationsHasMore = addedCount > 0 && parsed.size >= conversationsPageSize
+            conversationsHasMore = hasMorePages(
+                response = response,
+                fetchedCount = parsed.size,
+                pageSize = conversationsPageSize
+            )
             if (conversationsHasMore) conversationsNextPage += 1
             return cacheConversations
         } finally {
@@ -177,20 +183,43 @@ class NetworkChatRepository(
         val contactId = conversationId.toLongOrNull() ?: return emptyList()
         val existing = messagePagingByConversation[conversationId]
         val pageSize = existing?.pageSize ?: 60
-        val response = api.getChatMessages(
-            activeSession,
-            contactId = contactId,
-            page = 1,
-            limit = pageSize
-        )
-        val pageItems = response.firstArray("messages", "data", "rows", "result") ?: emptyArrayFrom(response)
-        val parsed = parseMessageRows(conversationId, pageItems)
         val previous = if (resetLoaded) emptyList() else existing?.loaded.orEmpty()
-        val merged = (previous + parsed).distinctBy { it.id }
+        var merged = previous
+        var cursorAfterId = previous.maxNumericMessageId()
+
+        if (previous.isEmpty()) {
+            val seedResponse = api.getChatMessages(
+                activeSession,
+                contactId = contactId,
+                page = 1,
+                limit = pageSize
+            )
+            val seedItems = seedResponse.firstArray("messages", "data", "rows", "result") ?: emptyArrayFrom(seedResponse)
+            val seedParsed = parseMessageRows(conversationId, seedItems)
+            merged = seedParsed.distinctBy { it.id }
+            cursorAfterId = merged.maxNumericMessageId()
+        }
+
+        while (cursorAfterId != null) {
+            val response = api.getChatMessages(
+                activeSession,
+                contactId = contactId,
+                afterId = cursorAfterId
+            )
+            val pageItems = response.firstArray("messages", "data", "rows", "result") ?: emptyArrayFrom(response)
+            val parsed = parseMessageRows(conversationId, pageItems)
+            if (parsed.isEmpty()) break
+            val nextMerged = (merged + parsed).distinctBy { it.id }
+            val nextCursor = nextMerged.maxNumericMessageId()
+            merged = nextMerged
+            if (nextCursor == null || nextCursor == cursorAfterId) break
+            cursorAfterId = nextCursor
+        }
+
         messagePagingByConversation[conversationId] = MessagePagingState(
             pageSize = pageSize,
-            nextPage = if (parsed.size >= pageSize) 2 else 1,
-            hasMore = parsed.size >= pageSize,
+            nextPage = 1,
+            hasMore = false,
             isLoading = false,
             loaded = merged
         )
@@ -198,31 +227,10 @@ class NetworkChatRepository(
     }
 
     suspend fun loadOlderMessagesPage(conversationId: String): List<ChatMessage> {
-        val activeSession = session ?: return emptyList()
-        val contactId = conversationId.toLongOrNull() ?: return emptyList()
+        if (!messagePagingByConversation.containsKey(conversationId)) return emptyList()
         val state = messagePagingByConversation.getOrPut(conversationId) { MessagePagingState() }
-        if (!state.hasMore || state.isLoading) return state.loaded
-        state.isLoading = true
-        try {
-            val response = api.getChatMessages(
-                activeSession,
-                contactId = contactId,
-                page = state.nextPage,
-                limit = state.pageSize
-            )
-            val pageItems = response.firstArray("messages", "data", "rows", "result") ?: emptyArrayFrom(response)
-            val parsed = parseMessageRows(conversationId, pageItems)
-            if (parsed.isEmpty()) {
-                state.hasMore = false
-                return state.loaded
-            }
-            state.loaded = (parsed + state.loaded).distinctBy { it.id }
-            state.hasMore = parsed.size >= state.pageSize
-            if (state.hasMore) state.nextPage += 1
-            return state.loaded
-        } finally {
-            state.isLoading = false
-        }
+        state.hasMore = false
+        return state.loaded
     }
 
     override suspend fun appendMessage(message: ChatMessage) {
@@ -417,6 +425,33 @@ class NetworkChatRepository(
     }
 }
 
+private fun hasMorePages(
+    response: JSONObject,
+    fetchedCount: Int,
+    pageSize: Int
+): Boolean {
+    val pagination = extractPagination(response)
+    if (pagination != null) {
+        return pagination.first < pagination.second
+    }
+    return fetchedCount >= pageSize
+}
+
+private fun extractPagination(response: JSONObject): Pair<Int, Int>? {
+    extractPaginationFromObject(response)?.let { return it }
+    response.optJSONObject("data")?.let { extractPaginationFromObject(it)?.let { p -> return p } }
+    response.optJSONObject("meta")?.let { extractPaginationFromObject(it)?.let { p -> return p } }
+    response.optJSONObject("pagination")?.let { extractPaginationFromObject(it)?.let { p -> return p } }
+    return null
+}
+
+private fun extractPaginationFromObject(obj: JSONObject): Pair<Int, Int>? {
+    val current = obj.firstIntOrNull("current_page", "page")
+    val total = obj.firstIntOrNull("total_pages", "last_page", "pages_count")
+    if (current == null || total == null || total <= 0) return null
+    return current to total
+}
+
 private fun parseMessageRows(conversationId: String, items: JSONArray): List<ChatMessage> {
     val indices = if (shouldReverseMessageOrder(items)) {
         (items.length() - 1 downTo 0).toList()
@@ -474,6 +509,9 @@ private fun parseMessageRows(conversationId: String, items: JSONArray): List<Cha
         }
     }
 }
+
+private fun List<ChatMessage>.maxNumericMessageId(): Long? =
+    asSequence().mapNotNull { it.id.toLongOrNull() }.maxOrNull()
 
 private fun parseWorkspaceOptions(response: JSONObject, fallbackCompanyId: Long): List<WorkspaceOption> {
     val result = buildList {
@@ -682,6 +720,20 @@ private fun JSONObject.firstInt(vararg keys: String): Int {
     return 0
 }
 
+private fun JSONObject.firstIntOrNull(vararg keys: String): Int? {
+    keys.forEach { key ->
+        if (!has(key)) return@forEach
+        val value = opt(key)
+        val number = when (value) {
+            is Number -> value.toInt()
+            is String -> value.toIntOrNull()
+            else -> null
+        }
+        if (number != null) return number
+    }
+    return null
+}
+
 private fun JSONObject.firstBoolean(vararg keys: String): Boolean? {
     keys.forEach { key ->
         if (!has(key)) return@forEach
@@ -711,8 +763,14 @@ private fun emptyArrayFrom(response: JSONObject): JSONArray {
 private fun formatApiDateTime(raw: String): String {
     val value = raw.trim()
     if (value.isEmpty()) return raw
-    val output = SimpleDateFormat("h:mm a", Locale.US)
-    output.timeZone = TimeZone.getTimeZone("Asia/Riyadh")
+    val timeOnlyOutput = SimpleDateFormat("h:mm a", Locale.US).apply {
+        timeZone = TimeZone.getTimeZone("Asia/Riyadh")
+    }
+    val fullOutput = SimpleDateFormat("MMM d, h:mm a", Locale.US).apply {
+        timeZone = TimeZone.getTimeZone("Asia/Riyadh")
+    }
+    val zone = TimeZone.getTimeZone("Asia/Riyadh")
+    val calendar = java.util.Calendar.getInstance(zone)
     val inputPatterns = listOf(
         "yyyy-MM-dd'T'HH:mm:ss.SSSSSS'Z'",
         "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
@@ -725,7 +783,10 @@ private fun formatApiDateTime(raw: String): String {
                 timeZone = TimeZone.getTimeZone("UTC")
             }
             val date = input.parse(value) ?: return@forEach
-            return output.format(date)
+            val dateCal = java.util.Calendar.getInstance(zone).apply { time = date }
+            val isToday = dateCal.get(java.util.Calendar.YEAR) == calendar.get(java.util.Calendar.YEAR) &&
+                dateCal.get(java.util.Calendar.DAY_OF_YEAR) == calendar.get(java.util.Calendar.DAY_OF_YEAR)
+            return if (isToday) timeOnlyOutput.format(date) else fullOutput.format(date)
         } catch (_: Exception) {
             // Try next known pattern.
         }

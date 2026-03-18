@@ -778,18 +778,6 @@ fun ChatScreen(
                     state = listState,
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    item {
-                        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                            Text(
-                                tr(locale, TextKey.TODAY),
-                                style = MaterialTheme.typography.labelSmall,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .background(MaterialTheme.colorScheme.secondary)
-                                    .padding(horizontal = 10.dp, vertical = 4.dp)
-                            )
-                        }
-                    }
                     items(messages, key = { it.id }) { msg ->
                         MessageBubble(msg = msg, darkMode = darkMode)
                     }

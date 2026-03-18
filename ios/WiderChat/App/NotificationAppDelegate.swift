@@ -17,6 +17,10 @@ final class NotificationAppDelegate: NSObject, UIApplicationDelegate, UNUserNoti
         Messaging.messaging().delegate = self
         UNUserNotificationCenter.current().delegate = self
         requestNotificationAuthorization(application)
+        if let userInfo = launchOptions?[.remoteNotification] as? [AnyHashable: Any],
+           let contactId = Self.extractContactId(from: userInfo) {
+            PushNotificationBridge.postOpenChat(contactId: contactId)
+        }
         return true
     }
 
@@ -37,11 +41,7 @@ final class NotificationAppDelegate: NSObject, UIApplicationDelegate, UNUserNoti
         didReceiveRemoteNotification userInfo: [AnyHashable: Any],
         fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
     ) {
-        if let contactId = Self.extractContactId(from: userInfo) {
-            Task { @MainActor in
-                PushNotificationBridge.postOpenChat(contactId: contactId)
-            }
-        }
+        // Do not auto-navigate on remote receipt; open chat only when user taps the notification.
         completionHandler(.newData)
     }
 
@@ -50,10 +50,6 @@ final class NotificationAppDelegate: NSObject, UIApplicationDelegate, UNUserNoti
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        let userInfo = notification.request.content.userInfo
-        if let contactId = Self.extractContactId(from: userInfo) {
-            PushNotificationBridge.postOpenChat(contactId: contactId)
-        }
         completionHandler([.banner, .sound, .badge])
     }
 
